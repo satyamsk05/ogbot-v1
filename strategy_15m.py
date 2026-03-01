@@ -12,6 +12,7 @@ class Strategy15M:
         self.wins = 0
         self.losses = 0
         self.next_planned_bet = "None"
+        self.enabled = True
         
     def reset_progression(self):
         self.martingale_step = 0
@@ -20,8 +21,8 @@ class Strategy15M:
         self.next_planned_bet = "None"
         
     def get_current_bet_amount(self):
-        # 3x progression
-        return self.base_bet_amount * (3 ** self.martingale_step)
+        # Linear progression: 1, 2, 3, 4, ...
+        return self.base_bet_amount * (self.martingale_step + 1)
 
     def process(self, client, live_data, current_balance, bot_mode):
         """
@@ -93,6 +94,14 @@ class Strategy15M:
                 if success:
                     self.active_bet_slug = live_data['current_slug']
                     self.active_bet_side = signal
+                    from telegram_bot import send_telegram_notification  # type: ignore
+                    send_telegram_notification(
+                        f"🤖 *Auto Trade Placed (15m)*\n\n"
+                        f"📦 *Market:* `{self.active_bet_slug}`\n"
+                        f"💰 *Stake:* `${amount:.2f}`\n"
+                        f"🎯 *Side:* `{signal}`\n"
+                        f"🔢 *Step:* {self.martingale_step + 1}"
+                    )
                     
             # Mark as processed whether order succeeded or failed/skipped
             self.last_processed_candle = last_candle_time

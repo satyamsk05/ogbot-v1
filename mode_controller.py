@@ -31,6 +31,7 @@ class ModeController:
         
         self.strategy_5m = Strategy5M(base_bet_amount=1.0)
         self.strategy_15m = Strategy15M(base_bet_amount=1.0)
+        self.active_strategies = "BOTH"  # "5M", "15M", "BOTH"
         
         self.running = True
 
@@ -55,7 +56,32 @@ class ModeController:
             self.strategy_15m.reset_progression()
             
         self.bot_mode = mode
-        return True, "Mode switched successfully"
+        icon = "🚀" if mode == "AUTO" else "🛑"
+        return True, f"{icon} Auto Bot Mode is now set to: {mode}"
+
+    def set_strategies_mode(self, mode):
+        """Set which strategies are active: 5M, 15M, or BOTH."""
+        mode = mode.upper()
+        if mode not in ["5M", "15M", "BOTH"]:
+            return False, "❌ Invalid market mode selected."
+        
+        self.active_strategies = mode
+        self.strategy_5m.enabled = (mode in ["5M", "BOTH"])
+        self.strategy_15m.enabled = (mode in ["15M", "BOTH"])
+        
+        target = "Both 5m & 15m" if mode == "BOTH" else f"{mode} only"
+        return True, f"🕒 Market Tracking updated to: {target}"
+
+    def set_base_bet(self, amount):
+        """Update base bet amount for both strategies."""
+        try:
+            val = float(amount)
+            if val <= 0: return False, "⚠️ Base bet amount must be positive."
+            self.strategy_5m.base_bet_amount = val
+            self.strategy_15m.base_bet_amount = val
+            return True, f"✅ Base bet successfully set to: ${val}"
+        except:
+            return False, "❌ Invalid amount entered. Please enter a number."
 
     def get_dashboard_layout(self):
         """
@@ -72,5 +98,7 @@ class ModeController:
         """Called periodically by the main thread."""
         if self.client:
             self.current_balance = check_balance(self.client)
-            self.strategy_5m.process(self.client, self.data_5m, self.current_balance, self.bot_mode)
-            self.strategy_15m.process(self.client, self.data_15m, self.current_balance, self.bot_mode)
+            if self.strategy_5m.enabled:
+                self.strategy_5m.process(self.client, self.data_5m, self.current_balance, self.bot_mode)
+            if self.strategy_15m.enabled:
+                self.strategy_15m.process(self.client, self.data_15m, self.current_balance, self.bot_mode)

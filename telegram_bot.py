@@ -4,6 +4,16 @@ import config  # type: ignore
 import threading
 import time
 from datetime import datetime
+import risk_manager
+import execution
+import fund_transfer
+
+# Simple class for navigation mocking
+class NavCall:
+    def __init__(self, data, message, call_id):
+        self.data = data
+        self.message = message
+        self.id = call_id
 
 # Global reference for notifications
 _bot_instance = None
@@ -39,6 +49,7 @@ def run_telegram_bot(mc):
             f"🚀 *POLYSYNC PREMIUM DASHBOARD*\n"
             f"──────────────────\n"
             f"👤 *Mode:* `{mode_label}`\n"
+            f"🕒 *Market Info:* `{mc.active_strategies}`\n"
             f"💰 *Balance:* `${mc.current_balance:,.2f}`\n"
             f"📊 *BTC Price:* `${mc.live_price:,.2f}`\n"
             f"📅 *Daily PnL:* `${mc.daily_pnl:,.2f}`\n"
@@ -52,6 +63,7 @@ def run_telegram_bot(mc):
             InlineKeyboardButton("📈 Trade 5m", callback_data="nav_trade_5m"),
             InlineKeyboardButton("📉 Trade 15m", callback_data="nav_trade_15m"),
             InlineKeyboardButton("⚙️ Settings", callback_data="nav_settings"),
+            InlineKeyboardButton("🕒 Market Mode", callback_data="nav_market_mode"),
             InlineKeyboardButton("💸 Transfer", callback_data="nav_transfer"),
             InlineKeyboardButton("🔄 Refresh", callback_data="nav_home")
         )
@@ -59,11 +71,12 @@ def run_telegram_bot(mc):
 
     def trade_menu_markup(timeframe):
         markup = InlineKeyboardMarkup(row_width=2)
+        base_amt = mc.strategy_5m.base_bet_amount if timeframe == "5m" else mc.strategy_15m.base_bet_amount
         markup.add(
-            InlineKeyboardButton("🟩 BUY UP ($1)", callback_data=f"bet_buy_{timeframe}_green_1"),
-            InlineKeyboardButton(" SELL UP", callback_data=f"bet_sell_{timeframe}_green_1"),
-            InlineKeyboardButton(" BUY DOWN ($1)", callback_data=f"bet_buy_{timeframe}_red_1"),
-            InlineKeyboardButton(" SELL DOWN", callback_data=f"bet_sell_{timeframe}_red_1"),
+            InlineKeyboardButton(f"🟩 BUY UP (${base_amt})", callback_data=f"ask_buy_{timeframe}_green_{base_amt}"),
+            InlineKeyboardButton(" SELL UP", callback_data=f"ask_sell_{timeframe}_green_{base_amt}"),
+            InlineKeyboardButton(f" BUY DOWN (${base_amt})", callback_data=f"ask_buy_{timeframe}_red_{base_amt}"),
+            InlineKeyboardButton(" SELL DOWN", callback_data=f"ask_sell_{timeframe}_red_{base_amt}"),
             InlineKeyboardButton("🎯 Custom Limit", callback_data=f"nav_limit_{timeframe}"),
             InlineKeyboardButton("⬅️ Back", callback_data="nav_home")
         )
@@ -71,10 +84,21 @@ def run_telegram_bot(mc):
 
     def settings_menu_markup():
         markup = InlineKeyboardMarkup(row_width=2)
-        mode_btn_text = "🔄 Set AUTO Mode" if mc.bot_mode == "MANUAL" else "🔄 Set MANUAL Mode"
         markup.add(
-            InlineKeyboardButton(mode_btn_text, callback_data="toggle_mode"),
+            InlineKeyboardButton("🟢 START AUTO BOT", callback_data="set_mode_AUTO"),
+            InlineKeyboardButton("🔴 STOP AUTO BOT", callback_data="set_mode_MANUAL"),
+            InlineKeyboardButton("💰 Set Base Bet", callback_data="set_base_bet"),
             InlineKeyboardButton("📊 Detailed Status", callback_data="nav_status"),
+            InlineKeyboardButton("⬅️ Back", callback_data="nav_home")
+        )
+        return markup
+    
+    def market_mode_markup():
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            InlineKeyboardButton("5m ONLY", callback_data="switch_market_5M"),
+            InlineKeyboardButton("15m ONLY", callback_data="switch_market_15M"),
+            InlineKeyboardButton("BOTH (5m & 15m)", callback_data="switch_market_BOTH"),
             InlineKeyboardButton("⬅️ Back", callback_data="nav_home")
         )
         return markup
@@ -109,6 +133,10 @@ def run_telegram_bot(mc):
                 bot.edit_message_text(get_header() + "\n⚙️ *Bot Settings:*", 
                                      chat_id=call.message.chat.id, message_id=call.message.message_id,
                                      reply_markup=settings_menu_markup(), parse_mode="Markdown")
+            elif page == "market_mode":
+                bot.edit_message_text(get_header() + "\n🕒 *Choose Market Tracking:*", 
+                                     chat_id=call.message.chat.id, message_id=call.message.message_id,
+                                     reply_markup=market_mode_markup(), parse_mode="Markdown")
             elif page == "status":
                 status_text = (
                     f"{get_header()}\n"
@@ -132,36 +160,70 @@ def run_telegram_bot(mc):
             print(f"Nav error: {e}")
 
     # --- Settings Logic ---
-    @bot.callback_query_handler(func=lambda call: call.data == "toggle_mode")
-    def toggle_mode_handler(call):
+    @bot.callback_query_handler(func=lambda call: call.data.startswith('set_mode_'))
+    def set_mode_handler(call):
         if not is_allowed(call.message): return
-        new_mode = "AUTO" if mc.bot_mode == "MANUAL" else "MANUAL"
-        success, msg = mc.switch_mode(new_mode)
-        bot.answer_callback_query(call.id, msg)
-        # Update settings screen
-        nav_handler(type('obj', (object,), {'data': 'nav_settings', 'message': call.message, 'id': call.id}))
+        target_mode = call.data.replace("set_mode_", "")
+        success, msg = mc.set_mode(target_mode)
+        bot.answer_callback_query(call.id, msg, show_alert=True)
+        # Update settings screen to show reflected changes in header
+        nav_handler(NavCall('nav_settings', call.message, call.id))
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith('switch_market_'))
+    def switch_market_handler(call):
+        if not is_allowed(call.message): return
+        mode = call.data.replace("switch_market_", "")
+        success, msg = mc.set_strategies_mode(mode)
+        bot.answer_callback_query(call.id, msg, show_alert=True)
+        nav_handler(NavCall('nav_market_mode', call.message, call.id))
+
+    @bot.callback_query_handler(func=lambda call: call.data == "set_base_bet")
+    def set_base_bet_handler(call):
+        msg = bot.edit_message_text("💰 *Set Base Bet Amount*\n\nReply with amount (e.g. `2.0`):", 
+                                   chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
+        bot.register_next_step_handler(msg, base_bet_input)
+
+    def base_bet_input(message):
+        success, msg = mc.set_base_bet(message.text)
+        bot.send_message(message.chat.id, f"{'✅' if success else '❌'} {msg}")
 
     # --- Trade Execution Logic ---
+    @bot.callback_query_handler(func=lambda call: call.data.startswith('ask_'))
+    def ask_confirm_handler(call):
+        if not is_allowed(call.message): return
+        if mc.bot_mode != "MANUAL":
+            bot.answer_callback_query(call.id, "❌ Error: Switch to MANUAL mode first!", show_alert=True)
+            return
+        
+        parts = call.data.split('_') # ask_buy_5m_green_1
+        action, timeframe, side, amount = parts[1], parts[2], parts[3], parts[4]
+        
+        markup = InlineKeyboardMarkup()
+        markup.add(
+            InlineKeyboardButton("✅ CONFIRM", callback_data=f"bet_{action}_{timeframe}_{side}_{amount}"),
+            InlineKeyboardButton("❌ CANCEL", callback_data=f"nav_trade_{timeframe}")
+        )
+        bot.edit_message_text(f"⚠️ *Confirm Manual Trade?*\n\n"
+                             f"• Action: `{action.upper()}`\n"
+                             f"• Market: `{timeframe}`\n"
+                             f"• Side: `{side.upper()}`\n"
+                             f"• Amount: `${amount}`", 
+                             chat_id=call.message.chat.id, message_id=call.message.message_id, 
+                             reply_markup=markup, parse_mode="Markdown")
+
     @bot.callback_query_handler(func=lambda call: call.data.startswith('bet_'))
     def bet_handler(call):
         if not is_allowed(call.message): return
         
-        if mc.bot_mode != "MANUAL":
-            bot.answer_callback_query(call.id, "❌ Error: Switch to MANUAL mode first!", show_alert=True)
-            return
-
-        bot.answer_callback_query(call.id, "⚡ Processing Trade...")
+        bot.answer_callback_query(call.id, "⚡ Trade request received! Processing...")
         parts = call.data.split('_') # bet_buy_5m_green_1
         action, timeframe, side, amount = parts[1], parts[2], parts[3], float(parts[4])
         
         execute_trade_logic(call.message.chat.id, action, timeframe, side, amount)
 
     def execute_trade_logic(chat_id, action, timeframe, side, amount):
-        from risk_manager import validate_bet
-        from execution import place_market_order, place_limit_order
-
         if action == "buy":
-            is_valid, reason = validate_bet(amount, mc.current_balance)
+            is_valid, reason = risk_manager.validate_bet(amount, mc.current_balance)
             if not is_valid:
                 bot.send_message(chat_id, f"🚨 *Risk Alert:* {reason}", parse_mode="Markdown")
                 return
@@ -178,11 +240,16 @@ def run_telegram_bot(mc):
         
         success = False
         if action == "buy":
-            success = place_market_order(mc.client, token_id, amount, signal)
+            success = execution.place_market_order(mc.client, token_id, amount, signal)
         else:
-            success = place_limit_order(mc.client, token_id, amount, 0.01, signal, is_buy=False)
+            success = execution.place_limit_order(mc.client, token_id, amount, 0.01, signal, is_buy=False)
             
         if success:
+            # Register with strategy for win/loss tracking
+            strat = mc.strategy_5m if timeframe == "5m" else mc.strategy_15m
+            strat.active_bet_slug = target_data.get('current_slug', '')
+            strat.active_bet_side = signal
+            
             bot.edit_message_text(f"✅ *{action.upper()} Successful!*\nMarket: `{timeframe}` | Stake: `${amount}`", 
                                  chat_id=chat_id, message_id=status_msg.message_id, parse_mode="Markdown")
         else:
@@ -237,12 +304,11 @@ def run_telegram_bot(mc):
     def limit_final_exec(message, tf, coin, action, price):
         try:
             amount = float(message.text)
-            from execution import place_limit_order
             target_data = mc.data_5m if tf == "5m" else mc.data_15m
             token_id = target_data.get('up_token') if coin == "up" else target_data.get('down_token')
             is_buy = True if action == "buy" else False
             bot.send_message(message.chat.id, "⏳ *Placing Limit Order...*", parse_mode="Markdown")
-            place_limit_order(mc.client, token_id, amount, price, coin.upper(), is_buy)
+            execution.place_limit_order(mc.client, token_id, amount, price, coin.upper(), is_buy)
         except:
             bot.send_message(message.chat.id, "❌ Invalid amount. Flow cancelled.")
 
@@ -265,7 +331,6 @@ def run_telegram_bot(mc):
     def transfer_final_exec(message, addr):
         try:
             amount = float(message.text)
-            import fund_transfer
             bot.send_message(message.chat.id, "⏳ *Processing Transfer...*", parse_mode="Markdown")
             success, res = fund_transfer.transfer_usdc(addr, amount)
             if success:
