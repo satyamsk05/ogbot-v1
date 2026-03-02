@@ -44,34 +44,57 @@ def run_telegram_bot(mc):
     # --- UI Components ---
     def get_header():
         now = datetime.now().strftime("%H:%M:%S")
-        mode_label = "🟢 AUTO" if mc.bot_mode == "AUTO" else "🔴 MANUAL"
+        status_icon = "🟢 RUNNING" if mc.bot_mode == "AUTO" else "🔴 STOPPED"
+        strat_name = "🛡️ SAFE MODE" if mc.martingale_type == "LINEAR" else "🚀 HIGH PROFIT"
+        
         return (
-            f"🚀 *POLYSYNC PREMIUM DASHBOARD*\n"
+            f"🤖 *MY TRADING BOT*\n"
             f"──────────────────\n"
-            f"👤 *Mode:* `{mode_label}`\n"
-            f"🕒 *Market Info:* `{mc.active_strategies}`\n"
+            f"⚡ *Status:* `{status_icon}`\n"
+            f"🎯 *Strategy:* `{strat_name}`\n"
             f"💰 *Balance:* `${mc.current_balance:,.2f}`\n"
-            f"📊 *BTC Price:* `${mc.live_price:,.2f}`\n"
-            f"📅 *Daily PnL:* `${mc.daily_pnl:,.2f}`\n"
-            f"🕒 *Last Update:* `{now}`\n"
+            f"💸 *Profit Today:* `${mc.daily_pnl:,.2f}`\n"
             f"──────────────────\n"
+            f"🕒 `{now}`\n"
         )
 
     def main_menu_markup():
         markup = InlineKeyboardMarkup(row_width=2)
-        markup.add(
-            InlineKeyboardButton("📈 Trade 5m", callback_data="nav_trade_5m"),
-            InlineKeyboardButton("📉 Trade 15m", callback_data="nav_trade_15m"),
-            InlineKeyboardButton("⚙️ Settings", callback_data="nav_settings"),
-            InlineKeyboardButton("🕒 Market Mode", callback_data="nav_market_mode"),
-            InlineKeyboardButton("💸 Transfer", callback_data="nav_transfer"),
-            InlineKeyboardButton("🔄 Refresh", callback_data="nav_home")
+        
+        # Big Toggle Button
+        if mc.bot_mode == "MANUAL":
+            markup.row(InlineKeyboardButton("▶️ START BOT (Auto)", callback_data="set_mode_AUTO"))
+        else:
+            markup.row(InlineKeyboardButton("⏸ STOP BOT", callback_data="set_mode_MANUAL"))
+            
+        # Strategy Switching
+        markup.row(
+            InlineKeyboardButton("🛡️ SAFE (1,2,3)", callback_data="switch_martingale_LINEAR"),
+            InlineKeyboardButton("🚀 HIGH PROFIT (1,3,9)", callback_data="switch_martingale_TRIPLE")
         )
+        
+        # Secondary actions
+        markup.row(
+            InlineKeyboardButton("📈 Trade 5m", callback_data="nav_trade_5m"),
+            InlineKeyboardButton("📉 Trade 15m", callback_data="nav_trade_15m")
+        )
+        
+        markup.row(
+            InlineKeyboardButton("💸 Withdraw $", callback_data="nav_transfer"),
+            InlineKeyboardButton("⚙️ More", callback_data="nav_settings")
+        )
+        
+        markup.row(InlineKeyboardButton("🔄 Refresh Dashboard", callback_data="nav_home"))
         return markup
 
     def trade_menu_markup(timeframe):
         markup = InlineKeyboardMarkup(row_width=2)
-        base_amt = mc.strategy_5m.base_bet_amount if timeframe == "5m" else mc.strategy_15m.base_bet_amount
+        strat = mc.strategy_5m if timeframe == "5m" else mc.strategy_15m
+        base_amt = strat.base_bet_amount
+        target_data = mc.data_5m if timeframe == "5m" else mc.data_15m
+        expiry = target_data.get('expiry', '--:--')
+        
+        markup.row(InlineKeyboardButton(f"🕒 Market Expiry: {expiry}", callback_data="none"))
         markup.add(
             InlineKeyboardButton(f"🟩 BUY UP (${base_amt})", callback_data=f"ask_buy_{timeframe}_green_{base_amt}"),
             InlineKeyboardButton(" SELL UP", callback_data=f"ask_sell_{timeframe}_green_{base_amt}"),
@@ -85,11 +108,19 @@ def run_telegram_bot(mc):
     def settings_menu_markup():
         markup = InlineKeyboardMarkup(row_width=2)
         markup.add(
-            InlineKeyboardButton("🟢 START AUTO BOT", callback_data="set_mode_AUTO"),
-            InlineKeyboardButton("🔴 STOP AUTO BOT", callback_data="set_mode_MANUAL"),
             InlineKeyboardButton("💰 Set Base Bet", callback_data="set_base_bet"),
+            InlineKeyboardButton("🕒 Market Mode", callback_data="nav_market_mode"),
             InlineKeyboardButton("📊 Detailed Status", callback_data="nav_status"),
             InlineKeyboardButton("⬅️ Back", callback_data="nav_home")
+        )
+        return markup
+
+    def martingale_menu_markup():
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            InlineKeyboardButton("📈 Linear ($1, $2, $3)", callback_data="switch_martingale_LINEAR"),
+            InlineKeyboardButton("🚀 Triple ($1, $3, $9)", callback_data="switch_martingale_TRIPLE"),
+            InlineKeyboardButton("⬅️ Back", callback_data="nav_settings")
         )
         return markup
     
@@ -137,11 +168,16 @@ def run_telegram_bot(mc):
                 bot.edit_message_text(get_header() + "\n🕒 *Choose Market Tracking:*", 
                                      chat_id=call.message.chat.id, message_id=call.message.message_id,
                                      reply_markup=market_mode_markup(), parse_mode="Markdown")
+            elif page == "martingale":
+                bot.edit_message_text(get_header() + "\n🤖 *Choose Betting System:*", 
+                                     chat_id=call.message.chat.id, message_id=call.message.message_id,
+                                     reply_markup=martingale_menu_markup(), parse_mode="Markdown")
             elif page == "status":
                 status_text = (
                     f"{get_header()}\n"
                     f"🔍 *Detailed Status:*\n"
                     f"• Auto Strategy: `Active`\n"
+                    f"• Betting System: `{mc.martingale_type}`\n"
                     f"• 5m Sequence: `{mc.data_5m.get('sequence', 'N/A')}`\n"
                     f"• 15m Sequence: `{mc.data_15m.get('sequence', 'N/A')}`\n"
                     f"• Network: `Polygon Mainnet`"
@@ -166,8 +202,8 @@ def run_telegram_bot(mc):
         target_mode = call.data.replace("set_mode_", "")
         success, msg = mc.set_mode(target_mode)
         bot.answer_callback_query(call.id, msg, show_alert=True)
-        # Update settings screen to show reflected changes in header
-        nav_handler(NavCall('nav_settings', call.message, call.id))
+        # Return to home to show updated status/buttons
+        nav_handler(NavCall('nav_home', call.message, call.id))
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith('switch_market_'))
     def switch_market_handler(call):
@@ -176,6 +212,15 @@ def run_telegram_bot(mc):
         success, msg = mc.set_strategies_mode(mode)
         bot.answer_callback_query(call.id, msg, show_alert=True)
         nav_handler(NavCall('nav_market_mode', call.message, call.id))
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith('switch_martingale_'))
+    def switch_martingale_handler(call):
+        if not is_allowed(call.message): return
+        m_type = call.data.replace("switch_martingale_", "")
+        success, msg = mc.set_martingale_type(m_type)
+        bot.answer_callback_query(call.id, msg, show_alert=True)
+        # Return to home to show updated status/buttons
+        nav_handler(NavCall('nav_home', call.message, call.id))
 
     @bot.callback_query_handler(func=lambda call: call.data == "set_base_bet")
     def set_base_bet_handler(call):
@@ -198,16 +243,21 @@ def run_telegram_bot(mc):
         parts = call.data.split('_') # ask_buy_5m_green_1
         action, timeframe, side, amount = parts[1], parts[2], parts[3], parts[4]
         
+        target_data = mc.data_5m if timeframe == "5m" else mc.data_15m
         markup = InlineKeyboardMarkup()
         markup.add(
             InlineKeyboardButton("✅ CONFIRM", callback_data=f"bet_{action}_{timeframe}_{side}_{amount}"),
             InlineKeyboardButton("❌ CANCEL", callback_data=f"nav_trade_{timeframe}")
         )
+        
+        price_info = target_data.get('beat_price', 0)
         bot.edit_message_text(f"⚠️ *Confirm Manual Trade?*\n\n"
                              f"• Action: `{action.upper()}`\n"
-                             f"• Market: `{timeframe}`\n"
+                             f"• Market: `{timeframe}` (Ends: `{target_data.get('expiry')}`)\n"
                              f"• Side: `{side.upper()}`\n"
-                             f"• Amount: `${amount}`", 
+                             f"• Amount: `${amount}`\n"
+                             f"• Approx. Price: `${price_info:.3f}`\n\n"
+                             f"⚡ *Note:* High prices (e.g. >0.55) mean the market is already favoring this side.", 
                              chat_id=call.message.chat.id, message_id=call.message.message_id, 
                              reply_markup=markup, parse_mode="Markdown")
 

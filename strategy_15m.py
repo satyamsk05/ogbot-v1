@@ -3,8 +3,9 @@ from risk_manager import validate_bet  # type: ignore
 from execution import place_market_order  # type: ignore
 
 class Strategy15M:
-    def __init__(self, base_bet_amount=1.0):
+    def __init__(self, base_bet_amount=1.0, martingale_type="LINEAR"):
         self.base_bet_amount = base_bet_amount
+        self.martingale_type = martingale_type
         self.martingale_step = 0
         self.active_bet_slug = ""
         self.active_bet_side = ""
@@ -21,8 +22,12 @@ class Strategy15M:
         self.next_planned_bet = "None"
         
     def get_current_bet_amount(self):
-        # Linear progression: 1, 2, 3, 4, ...
-        return self.base_bet_amount * (self.martingale_step + 1)
+        if self.martingale_type == "TRIPLE":
+            # Triple progression: 1, 3, 9, 27, 81...
+            return self.base_bet_amount * (3 ** self.martingale_step)
+        else:
+            # Linear progression: 1, 2, 3, 4, ...
+            return self.base_bet_amount * (self.martingale_step + 1)
 
     def process(self, client, live_data, current_balance, bot_mode):
         """

@@ -29,8 +29,9 @@ class ModeController:
         self.data_5m = {"candles": [], "current_slug": "", "up_token": None, "down_token": None, "market_name": "", "beat_price": 0.0}
         self.data_15m = {"candles": [], "current_slug": "", "up_token": None, "down_token": None, "market_name": "", "beat_price": 0.0}
         
-        self.strategy_5m = Strategy5M(base_bet_amount=1.0)
-        self.strategy_15m = Strategy15M(base_bet_amount=1.0)
+        self.strategy_5m = Strategy5M(base_bet_amount=1.0, martingale_type=config.DEFAULT_MARTINGALE_TYPE)
+        self.strategy_15m = Strategy15M(base_bet_amount=1.0, martingale_type=config.DEFAULT_MARTINGALE_TYPE)
+        self.martingale_type = config.DEFAULT_MARTINGALE_TYPE
         self.active_strategies = "BOTH"  # "5M", "15M", "BOTH"
         
         self.running = True
@@ -82,6 +83,23 @@ class ModeController:
             return True, f"✅ Base bet successfully set to: ${val}"
         except:
             return False, "❌ Invalid amount entered. Please enter a number."
+
+    def set_martingale_type(self, m_type):
+        """Switch martingale system for both strategies."""
+        m_type = m_type.upper()
+        if m_type not in ["LINEAR", "TRIPLE"]:
+            return False, "❌ Invalid martingale type."
+        
+        self.martingale_type = m_type
+        self.strategy_5m.martingale_type = m_type
+        self.strategy_15m.martingale_type = m_type
+        
+        # Reset progression when changing system
+        self.strategy_5m.reset_progression()
+        self.strategy_15m.reset_progression()
+        
+        desc = "Linear ($1, $2, $3)" if m_type == "LINEAR" else "Triple ($1, $3, $9)"
+        return True, f"🤖 Betting System set to: {desc}"
 
     def get_dashboard_layout(self):
         """

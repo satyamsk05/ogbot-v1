@@ -2,6 +2,7 @@ import requests  # type: ignore
 import time
 import json
 import threading
+import re
 from datetime import datetime
 from rich.live import Live  # type: ignore
 
@@ -53,17 +54,26 @@ def fetch_market_data(mc, timeframe="5m", interval_seconds=300):
                 
             # 2. Fetch Polymarket Gamma Data
             now = int(time.time())
+            # The window ends every 300s (5m) or 900s (15m)
             rounded_end = ((now // interval_seconds) + 1) * interval_seconds
             
+            # Buffer: Only switch to the NEXT market if there's < 60 seconds left in current one
+            target_timestamp = rounded_end
+            if (rounded_end - now) > 60:
+                target_timestamp = rounded_end - interval_seconds
+                
             up_token = None
             down_token = None
             market_name = ""
             current_slug = ""
             found_market = False
             
-            # Check current window and previous in case of slight delay
-            for offset in [0, interval_seconds]:
-                slug = f"btc-updown-{timeframe}-{rounded_end - offset}"
+            target_data = mc.data_5m if timeframe == "5m" else mc.data_15m
+            target_data['candles'] = candles
+
+            # Check target window and the one after it
+            for ts in [target_timestamp, target_timestamp + interval_seconds]:
+                slug = f"btc-updown-{timeframe}-{ts}"
                 try:
                     gr = requests.get(f"{config.GAMMA_API}/events?slug={slug}", timeout=5)
                     gdata = gr.json()
@@ -77,26 +87,36 @@ def fetch_market_data(mc, timeframe="5m", interval_seconds=300):
                                 market_name = m.get('question', '')
                                 current_slug = slug
                                 found_market = True
+                                expiry_str = datetime.fromtimestamp(ts).strftime("%H:%M")
+                                target_data['expiry'] = expiry_str
                                 break
                 except:
                     continue
                     
-            target_data = mc.data_5m if timeframe == "5m" else mc.data_15m
-            target_data['candles'] = candles
-            
             if found_market:
                 target_data['up_token'] = up_token
                 target_data['down_token'] = down_token
                 target_data['market_name'] = market_name
                 target_data['current_slug'] = current_slug
                 
-                # Best approximation for beat price (open of the current forming candle or live price)
-                # the forming candle is data[-1]
-                forming_open = float(data[-1][1])
-                target_data['beat_price'] = forming_open if forming_open > 0 else mc.live_price
-            
+                # Best approximation for beat price (Try Question first, then forming candle)
+                beat_price = 0.0
+                try:
+                    # Parse "$66,756.99" from "Will BTC be above $66,756.99..."
+                    match = re.search(r'\$([0-9,.]+)', market_name)
+                    if match:
+                        beat_price = float(match.group(1).replace(',', ''))
+                except:
+                    pass
+                
+                if beat_price == 0.0 and data:
+                    # Fallback to forming candle's open price
+                    beat_price = float(data[-1][1])
+                
+                target_data['beat_price'] = beat_price if beat_price > 0 else mc.live_price
+                
         except Exception as e:
-            # print(f"Data fetch error ({timeframe}): {e}")
+            # print(f"Fetch error: {e}")
             pass
             
         time.sleep(15)
