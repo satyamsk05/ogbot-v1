@@ -205,11 +205,9 @@ class Strategy5M:
                     if config.DRY_RUN:
                         self.mc.update_virtual_pnl(-amount, stake=amount)
                         
-                    # Store expiry timestamp
-                    try:
-                        self.active_bet_expiry = int(float(self.active_bet_slug.split('-')[-1]))
-                    except:
-                        self.active_bet_expiry = int(time.time() + 300)
+                    # Store expiry: wait for the NEXT 5-min candle to close
+                    now_ts = int(time.time())
+                    self.active_bet_expiry = ((now_ts // 300) + 1) * 300
                         
                     # Extract details for notification
                     side_name = order_details.get('side_name', signal) if isinstance(order_details, dict) else signal

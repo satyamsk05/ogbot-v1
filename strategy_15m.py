@@ -200,10 +200,9 @@ class Strategy15M:
                     if config.DRY_RUN:
                         self.mc.update_virtual_pnl(-amount, stake=amount)
                         
-                    try:
-                        self.active_bet_expiry = int(float(self.active_bet_slug.split('-')[-1]))
-                    except:
-                        self.active_bet_expiry = int(time.time() + 900)
+                    # Store expiry: wait for the NEXT 15-min candle to close
+                    now_ts = int(time.time())
+                    self.active_bet_expiry = ((now_ts // 900) + 1) * 900
                         
                     side_name = order_details.get('side_name', signal) if isinstance(order_details, dict) else signal
                     price_str = f"{order_details.get('avg_price', 0):.4f}" if isinstance(order_details, dict) else "N/A"
