@@ -146,7 +146,7 @@ def main():
     
     try:
         # Wrap the continuous loop inside the Rich Live UI context
-        with Live(mc.get_dashboard_layout(), refresh_per_second=5, screen=True) as live:
+        with Live(mc.get_dashboard_layout(), refresh_per_second=2) as live:
             while mc.running:
                 current_time = time.time()
                 
@@ -157,7 +157,7 @@ def main():
                 
                 # Update the Rich Live Display layout
                 live.update(mc.get_dashboard_layout())
-                time.sleep(0.2)
+                time.sleep(0.5)
                 
     except KeyboardInterrupt:
         mc.running = False
