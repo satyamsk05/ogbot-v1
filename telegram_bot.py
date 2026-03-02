@@ -55,12 +55,17 @@ def run_telegram_bot(mc):
         seq_5m = s5.get_candle_sequence_display(mc.data_5m.get('candles', []))
         seq_15m = s15.get_candle_sequence_display(mc.data_15m.get('candles', []))
         
-        return (
-            f"🤖 *MY TRADING BOT*\n"
-            f"──────────────────\n"
-            f"⚡ *Status:* `{status_icon}`\n"
-            f"🎯 *Strategy:* `{strat_name}` | 💰 `${mc.current_balance:,.2f}`\n"
-            f"🤖 *Cashout:* `{cashout_status}`\n"
+        # Display balance with Virtual tag if in dry run
+        bal_prefix = "💰 *BALANCE [VIRTUAL]:*" if config.DRY_RUN else "💰 *BALANCE:*"
+        
+        header = (
+            f"🤖 *OGBot v1+ Dashboard*\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"🚦 *STATUS:* `{status_icon}`\n"
+            f"⚙️ *MODE:* `{strat_name}`\n"
+            f"🔄 *AUTO CASH:* `{cashout_status}`\n"
+            f"{bal_prefix} `${mc.current_balance:,.2f}`\n"
+            f"📈 *DAILY PnL:* `${mc.daily_pnl:,.2f}`\n\n"
             f"──────────────────\n"
             f"📊 *5m:* {seq_5m}\n"
             f"   → `{s5.next_planned_bet}`\n"
@@ -69,6 +74,7 @@ def run_telegram_bot(mc):
             f"──────────────────\n"
             f"📈 W: `{s5.wins + s15.wins}` | L: `{s5.losses + s15.losses}` | 🕒 `{now}`\n"
         )
+        return header
 
     def main_menu_markup():
         markup = InlineKeyboardMarkup(row_width=2)
@@ -128,9 +134,15 @@ def run_telegram_bot(mc):
         markup.add(
             InlineKeyboardButton("💰 Set Base Bet", callback_data="set_base_bet"),
             InlineKeyboardButton("🕒 Market Mode", callback_data="nav_market_mode"),
-            InlineKeyboardButton("📊 Detailed Status", callback_data="nav_status"),
-            InlineKeyboardButton("⬅️ Back", callback_data="nav_home")
+            InlineKeyboardButton("📊 Detailed Status", callback_data="nav_status")
         )
+        if config.DRY_RUN:
+            markup.add(
+                InlineKeyboardButton("🔄 Reset Wallet", callback_data="reset_virtual"),
+                InlineKeyboardButton("⚙️ Sim Settings", callback_data="nav_sim_settings")
+            )
+            
+        markup.add(InlineKeyboardButton("⬅️ Back", callback_data="nav_home"))
         return markup
 
     def martingale_menu_markup():
@@ -190,19 +202,41 @@ def run_telegram_bot(mc):
                 bot.edit_message_text(get_header() + "\n🤖 *Choose Betting System:*", 
                                      chat_id=call.message.chat.id, message_id=call.message.message_id,
                                      reply_markup=martingale_menu_markup(), parse_mode="Markdown")
+            elif page == "sim_settings":
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(
+                    InlineKeyboardButton(f"💸 Fees: {mc.sim_fees*100:.1f}%", callback_data="set_sim_fees"),
+                    InlineKeyboardButton(f"📉 Slippage: {mc.sim_slippage*100:.1f}%", callback_data="set_sim_slippage"),
+                    InlineKeyboardButton("💰 Set Custom Balance", callback_data="set_sim_bal"),
+                    InlineKeyboardButton("⬅️ Back", callback_data="nav_settings")
+                )
+                bot.edit_message_text(f"⚙️ *Simulation Settings*\n\nFees and slippage make the dry-run more realistic by simulating market impact and costs.", 
+                                     chat_id=call.message.chat.id, message_id=call.message.message_id,
+                                     reply_markup=markup, parse_mode="Markdown")
             elif page == "status":
                 s5 = mc.strategy_5m
                 s15 = mc.strategy_15m
+                pnl_color = "🟢" if mc.daily_pnl >= 0 else "🔴"
+    
+                bal_label = "VIRTUAL WALLET" if config.DRY_RUN else "REAL WALLET"
+    
                 status_text = (
-                    f"{get_header()}\n"
-                    f"🔍 *Detailed Status:*\n"
+                    f"📊 *DETAILED STATUS ({bal_label})*\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                    f"💰 *Balance:* `${mc.current_balance:,.2f}`\n"
+                    f"📈 *Daily PnL:* {pnl_color} `${mc.daily_pnl:,.2f}`\n"
+                    f"──────────────────\n"
                     f"• Betting: `{mc.martingale_type}`\n"
                     f"• 5m Wins/Losses: `{s5.wins}/{s5.losses}`\n"
                     f"• 15m Wins/Losses: `{s15.wins}/{s15.losses}`\n"
                     f"• 5m Step: `{s5.martingale_step + 1}` ({s5.next_planned_bet})\n"
                     f"• 15m Step: `{s15.martingale_step + 1}` ({s15.next_planned_bet})\n"
                     f"• 5m Warmed Up: `{'✅' if s5.is_warmed_up else '❌'}`\n"
-                    f"• 15m Warmed Up: `{'✅' if s15.is_warmed_up else '❌'}`\n"
+                    f"• 15m Warmed Up: `{'✅' if s15.is_warmed_up else '❌'}`\n\n"
+                    f"📈 *Simulation Performance:*\n"
+                    f"• Win Rate: `{((mc.sim_wins/mc.sim_trades)*100 if mc.sim_trades>0 else 0):.1f}%`\n"
+                    f"• Total Stakes: `${mc.sim_stake:,.2f}`\n"
+                    f"• Net Goal: `$500 ➔ ${mc.current_balance:,.2f}`\n"
                     f"• Network: `Polygon Mainnet`"
                 )
                 markup = InlineKeyboardMarkup()
@@ -217,6 +251,51 @@ def run_telegram_bot(mc):
         except Exception as e:
             bot.answer_callback_query(call.id, "Error in navigation")
             print(f"Nav error: {e}")
+
+    @bot.callback_query_handler(func=lambda call: call.data == "reset_virtual")
+    def reset_virtual_handler(call):
+        if not is_allowed(call.message): return
+        success, msg = mc.reset_virtual_balance()
+        bot.answer_callback_query(call.id, msg, show_alert=True)
+        nav_handler(NavCall('nav_home', call.message, call.id))
+
+    @bot.callback_query_handler(func=lambda call: call.data == "set_sim_bal")
+    def set_sim_bal_handler(call):
+        msg = bot.edit_message_text("💰 *Set Custom Virtual Balance*\nEnter amount (e.g. `1000.0`):", 
+                                   chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
+        bot.register_next_step_handler(msg, sim_bal_input)
+
+    def sim_bal_input(message):
+        success, msg = mc.set_virtual_balance(message.text)
+        bot.send_message(message.chat.id, f"{'✅' if success else '❌'} {msg}")
+
+    @bot.callback_query_handler(func=lambda call: call.data == "set_sim_fees")
+    def set_sim_fees_handler(call):
+        msg = bot.edit_message_text("💸 *Set Simulated Fee (%)*\nEnter percentage (e.g. `0.1` for 0.1%):", 
+                                   chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
+        bot.register_next_step_handler(msg, sim_fees_input)
+
+    def sim_fees_input(message):
+        try:
+            val = float(message.text) / 100.0
+            mc.sim_fees = val
+            bot.send_message(message.chat.id, f"✅ Fees set to {val*100:.1f}%")
+        except:
+            bot.send_message(message.chat.id, "❌ Invalid input.")
+
+    @bot.callback_query_handler(func=lambda call: call.data == "set_sim_slippage")
+    def set_sim_slippage_handler(call):
+        msg = bot.edit_message_text("📉 *Set Simulated Slippage (%)*\nEnter percentage (e.g. `0.5` for 0.5%):", 
+                                   chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown")
+        bot.register_next_step_handler(msg, sim_slippage_input)
+
+    def sim_slippage_input(message):
+        try:
+            val = float(message.text) / 100.0
+            mc.sim_slippage = val
+            bot.send_message(message.chat.id, f"✅ Slippage set to {val*100:.1f}%")
+        except:
+            bot.send_message(message.chat.id, "❌ Invalid input.")
 
     # --- Settings Logic ---
     @bot.callback_query_handler(func=lambda call: call.data.startswith('set_mode_'))

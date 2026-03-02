@@ -28,3 +28,4 @@ SYMBOL = "BTCUSDT"
 
 # Dry run flag for testing
 DRY_RUN = os.getenv("DRY_RUN", "False").lower() in ("true", "1", "yes", "t")
+VIRTUAL_START_BALANCE = float(os.getenv("VIRTUAL_START_BALANCE", "500.0"))

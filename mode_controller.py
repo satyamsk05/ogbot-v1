@@ -29,11 +29,21 @@ class ModeController:
         self.data_5m = {"candles": [], "current_slug": "", "up_token": None, "down_token": None, "market_name": "", "beat_price": 0.0}
         self.data_15m = {"candles": [], "current_slug": "", "up_token": None, "down_token": None, "market_name": "", "beat_price": 0.0}
         
-        self.strategy_5m = Strategy5M(base_bet_amount=1.0, martingale_type=config.DEFAULT_MARTINGALE_TYPE)
-        self.strategy_15m = Strategy15M(base_bet_amount=1.0, martingale_type=config.DEFAULT_MARTINGALE_TYPE)
+        self.strategy_5m = Strategy5M(mc=self, base_bet_amount=1.0, martingale_type=config.DEFAULT_MARTINGALE_TYPE)
+        self.strategy_15m = Strategy15M(mc=self, base_bet_amount=1.0, martingale_type=config.DEFAULT_MARTINGALE_TYPE)
         self.martingale_type = config.DEFAULT_MARTINGALE_TYPE
+        
+        # Virtual Balance for Dry Run
+        self.virtual_balance = config.VIRTUAL_START_BALANCE
+        self.current_balance = self.virtual_balance if config.DRY_RUN else 0.0
         self.active_strategies = "BOTH"  # "5M", "15M", "BOTH"
         
+        # Simulation Stats
+        self.sim_trades = 0
+        self.sim_wins = 0
+        self.sim_stake = 0.0
+        self.sim_slippage = 0.005  # 0.5% default slippage
+        self.sim_fees = 0.001      # 0.1% default fees
         self.last_redeem_time = 0
         self.auto_redeem_enabled = True
         self.running = True
@@ -41,8 +51,8 @@ class ModeController:
     def initialize(self):
         print(f"{GREEN}Initializing Mode Controller...{RESET}")
         self.client = get_client()
-        if self.client:
-            self.current_balance = check_balance(self.client)
+        if self.client and not config.DRY_RUN:
+            self.update_balance(check_balance(self.client))
             
     def set_mode(self, mode):
         """Safely switch bot mode."""
@@ -120,11 +130,70 @@ class ModeController:
             
         return self.dashboard.generate_layout()
 
+    def update_balance(self, balance: float):
+        if config.DRY_RUN:
+            # In Dry Run, we don't overwrite from external source
+            # current_balance is always virtual_balance
+            self.current_balance = self.virtual_balance
+        else:
+            self.current_balance = balance
+
+    def update_virtual_pnl(self, amount: float, is_win: bool = False, stake: float = 0.0):
+        """Update virtual balance and notify"""
+        if config.DRY_RUN:
+            actual_amount = amount
+            if stake > 0:
+                # Deduct fees on entry
+                fee = stake * self.sim_fees
+                actual_amount -= fee
+                self.sim_stake += stake
+                self.sim_trades += 1
+            
+            if is_win:
+                # Apply slippage on exit (payout)
+                actual_amount = actual_amount * (1 - self.sim_slippage)
+                self.sim_wins += 1
+                
+            self.virtual_balance += actual_amount
+            self.current_balance = self.virtual_balance
+            # Update Daily PnL
+            self.daily_pnl = self.virtual_balance - config.VIRTUAL_START_BALANCE
+
+    def set_virtual_balance(self, amount):
+        """Manual reset to custom amount"""
+        try:
+            val = float(amount)
+            self.virtual_balance = val
+            self.current_balance = val
+            self.daily_pnl = 0.0 # Reset PnL relative to new start
+            config.VIRTUAL_START_BALANCE = val # Update baseline
+            return True, f"✅ Virtual wallet set to: ${val:.2f}"
+        except:
+            return False, "❌ Invalid amount."
+
+    def reset_virtual_balance(self):
+        """Reset simulation stats and wallet"""
+        if config.DRY_RUN:
+            self.virtual_balance = config.VIRTUAL_START_BALANCE
+            self.current_balance = self.virtual_balance
+            self.daily_pnl = 0.0
+            self.sim_trades = 0
+            self.sim_wins = 0
+            self.sim_stake = 0.0
+            self.strategy_5m.wins = 0
+            self.strategy_5m.losses = 0
+            self.strategy_15m.wins = 0
+            self.strategy_15m.losses = 0
+            return True, "💡 Virtual wallet and stats have been reset to $500."
+        return False, "❌ Not in Dry Run mode."
+
     def process_cycle(self):
         """Called periodically by the main thread."""
         if self.client:
             # 1. Update Balance & Strategy Processing
-            self.current_balance = check_balance(self.client)
+            if not config.DRY_RUN:
+                self.update_balance(check_balance(self.client))
+            
             if self.strategy_5m.enabled:
                 self.strategy_5m.process(self.client, self.data_5m, self.current_balance, self.bot_mode)
             if self.strategy_15m.enabled:

@@ -70,6 +70,17 @@ class Dashboard:
             Text(f"${current_exposure:,.2f}", style="yellow")
         )
         
+        if config.DRY_RUN:
+            win_rate = (self.mc.sim_wins / self.mc.sim_trades * 100) if self.mc.sim_trades > 0 else 0.0
+            table.add_row(
+                "Virtual Stats:",
+                Text(f"W: {self.mc.sim_wins} / T: {self.mc.sim_trades} ({win_rate:.1f}%)", style="magenta")
+            )
+            table.add_row(
+                "Total Vol (Sim):",
+                Text(f"${self.mc.sim_stake:,.2f}", style="dim")
+            )
+        
         return Panel(
             table,
             title="[bold cyan]Wallet Stats[/bold cyan]",
@@ -124,7 +135,15 @@ class Dashboard:
         table.add_row("Round vs Live:", f"[dim]${round_price:,.2f}[/dim] ➔ [white]${self.mc.live_price:,.2f}[/white]{diff_str}")
         table.add_row("Closes In:", countdown_str)
         table.add_row("Target Bet (Auto):", f"[{bet_style}]{target_bet}[/{bet_style}]")
-        table.add_row("Active Exposure:", f"[yellow]${active_exposure:,.2f}[/yellow]" if active_exposure > 0 else "[dim]None[/dim]")
+        
+        # ACTIVE BET DETAILS
+        if strategy.active_bet_side:
+            side_color = "green" if strategy.active_bet_side == "UP" else "red"
+            bet_info = f"[{side_color}]BET {strategy.active_bet_side}[/{side_color}] [yellow]${strategy.active_bet_amount:.2f}[/yellow]"
+            table.add_row("Live Bet:", bet_info)
+        else:
+            table.add_row("Live Bet:", "[dim]None[/dim]")
+
         table.add_row("Progression:", f"[cyan]Step {strategy.martingale_step + 1}[/cyan]")
         
         return Panel(

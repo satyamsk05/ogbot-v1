@@ -5,13 +5,16 @@ from risk_manager import validate_bet  # type: ignore
 from execution import place_market_order  # type: ignore
 
 class Strategy5M:
-    def __init__(self, base_bet_amount=1.0, martingale_type="LINEAR"):
+    def __init__(self, mc, base_bet_amount=1.0, martingale_type="LINEAR"):
+        self.mc = mc
         self.base_bet_amount = base_bet_amount
         self.martingale_type = martingale_type
         self.martingale_step = 0
         self.active_bet_slug = ""
         self.active_bet_side = ""
         self.active_bet_expiry = 0
+        self.active_bet_amount = 0.0
+        self.active_shares = 0.0
         self.last_processed_candle = ""
         self.wins = 0
         self.losses = 0
@@ -28,6 +31,8 @@ class Strategy5M:
         self.active_bet_slug = ""
         self.active_bet_side = ""
         self.active_bet_expiry = 0
+        self.active_bet_amount = 0.0
+        self.active_shares = 0.0
         self.next_planned_bet = "None"
         # Also reset warmup so bot re-observes candles
         self.candles_observed = 0
@@ -98,10 +103,16 @@ class Strategy5M:
             
             if won:
                 self.wins += 1
+                # Simulated Payout: 1 Share = $1
+                if config.DRY_RUN:
+                    self.mc.update_virtual_pnl(self.active_shares, is_win=True)
+                
                 self.martingale_step = 0  # Reset step but keep warmup
                 self.active_bet_slug = ""
                 self.active_bet_side = ""
                 self.active_bet_expiry = 0
+                self.active_bet_amount = 0.0
+                self.active_shares = 0.0
                 from telegram_bot import send_telegram_notification  # type: ignore
                 send_telegram_notification(f"🏆 *Trade Won! (5m)*\n\n*Direction:* {bet_direction}\n*Wins:* {self.wins} | *Losses:* {self.losses}")
             else:
@@ -109,9 +120,12 @@ class Strategy5M:
                 self.martingale_step += 1
                 if self.martingale_step >= config.MAX_PROGRESSION_STEPS:
                     self.martingale_step = 0  # Safety reset
+                # Stake was already deducted when placed, so no extra deduction here
                 self.active_bet_slug = ""
                 self.active_bet_side = ""
                 self.active_bet_expiry = 0
+                self.active_bet_amount = 0.0
+                self.active_shares = 0.0
                 from telegram_bot import send_telegram_notification  # type: ignore
                 send_telegram_notification(f"💔 *Trade Lost (5m)*\n\n*Direction:* {bet_direction}\n*Next Stake:* ${self.get_current_bet_amount():.2f} (Step {self.martingale_step + 1})")
 
@@ -164,6 +178,13 @@ class Strategy5M:
                 if success:
                     self.active_bet_slug = live_data['current_slug']
                     self.active_bet_side = signal
+                    self.active_bet_amount = float(amount)
+                    self.active_shares = float(order_details.get("shares_acquired") or (amount / 0.50))
+                    
+                    # In Dry Run, deduct stake from virtual balance immediately
+                    if config.DRY_RUN:
+                        self.mc.update_virtual_pnl(-amount, stake=amount)
+                        
                     # Store expiry timestamp
                     try:
                         self.active_bet_expiry = int(float(self.active_bet_slug.split('-')[-1]))
