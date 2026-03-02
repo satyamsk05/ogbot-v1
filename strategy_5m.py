@@ -1,4 +1,6 @@
 import config  # type: ignore
+import time
+from datetime import datetime
 from risk_manager import validate_bet  # type: ignore
 from execution import place_market_order  # type: ignore
 
@@ -9,6 +11,7 @@ class Strategy5M:
         self.martingale_step = 0
         self.active_bet_slug = ""
         self.active_bet_side = ""
+        self.active_bet_expiry = 0
         self.last_processed_candle = ""
         self.wins = 0
         self.losses = 0
@@ -19,6 +22,7 @@ class Strategy5M:
         self.martingale_step = 0
         self.active_bet_slug = ""
         self.active_bet_side = ""
+        self.active_bet_expiry = 0
         self.next_planned_bet = "None"
         
     def get_current_bet_amount(self):
@@ -46,29 +50,35 @@ class Strategy5M:
         last_candle_time = live_data['candles'][-1]['time']
         
         # Check if we won/lost the previous bet
-        if self.active_bet_slug and self.active_bet_slug != live_data['current_slug']:
+        now = time.time()
+        if self.active_bet_slug and now > (self.active_bet_expiry + 30):
+            # 30s buffer after expiry to let API update
             prev_candle = live_data['candles'][-1]
-            won = (self.active_bet_side == "UP" and prev_candle['color'] == "GREEN") or \
-                  (self.active_bet_side == "DOWN" and prev_candle['color'] == "RED")
+            # Use beat_price vs current candle if available for better accuracy
+            beat_p = live_data.get('beat_price', 0)
+            
+            won = False
+            if self.active_bet_side == "UP":
+                won = prev_candle['close'] > beat_p
+            else:
+                won = prev_candle['close'] < beat_p
                   
             if won:
                 self.wins += 1
                 self.reset_progression()
-                print(f"\033[92m\033[1m[WIN (5m)] Trade Won! Resetting Stake to ${self.base_bet_amount}\033[0m")
                 from telegram_bot import send_telegram_notification  # type: ignore
                 send_telegram_notification(f"🏆 *Trade Won! (5m)*\n\n*Market:* `{self.active_bet_slug}`\n*Direction:* {self.active_bet_side}")
             else:
                 self.losses += 1
                 self.martingale_step += 1
                 if self.martingale_step >= config.MAX_PROGRESSION_STEPS:
-                    self.martingale_step = 0 # Safety reset if max hit
-                new_stake = self.get_current_bet_amount()
-                print(f"\033[91m\033[1m[LOSS (5m)] Trade Lost. Increasing Stake to ${new_stake:.2f} (Step {self.martingale_step + 1})\033[0m")
+                    self.martingale_step = 0 
                 from telegram_bot import send_telegram_notification  # type: ignore
                 send_telegram_notification(f"💔 *Trade Lost (5m)*\n\n*Market:* `{self.active_bet_slug}`\n*Direction:* {self.active_bet_side}\n*Martingale Step:* {self.martingale_step}")
             
             self.active_bet_slug = ""
             self.active_bet_side = ""
+            self.active_bet_expiry = 0
 
         # Determine signal based on rules: 5m: two RED -> bet GREEN (UP)
         last2 = [c['color'] for c in live_data['candles'][-2:]]
@@ -95,19 +105,40 @@ class Strategy5M:
                 pass
             else:
                 token_id = live_data['up_token'] if signal == "UP" else live_data['down_token']
-                success = place_market_order(client, token_id, amount, signal)
+                
+                # Call place_market_order and get detailed results
+                success, order_details = place_market_order(client, token_id, amount, signal)
+                
                 if success:
-                    print(f"\033[94m[Strategy 5m] Pattern: {last2} | SIGNAL: {signal} | AMOUNT: ${amount:.2f}\033[0m")
                     self.active_bet_slug = live_data['current_slug']
                     self.active_bet_side = signal
+                    # Store expiry timestamp
+                    try:
+                        self.active_bet_expiry = int(float(self.active_bet_slug.split('-')[-1]))
+                    except:
+                        self.active_bet_expiry = int(time.time() + 300)
+                        
+                    # Extract details for notification
+                    side_name = order_details.get('side_name', signal)
+                    price_str = f"{order_details.get('avg_price', 0):.4f}"
+                    shares_str = f"{order_details.get('shares_acquired', 0):.2f}"
+                    
+                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    
+                    # Send Telegram notification with detailed info
                     from telegram_bot import send_telegram_notification  # type: ignore
-                    send_telegram_notification(
+                    notif_msg = (
                         f"🤖 *Auto Trade Placed (5m)*\n\n"
+                        f"⏱ *Time:* `{now_str}`\n"
                         f"📦 *Market:* `{self.active_bet_slug}`\n"
                         f"💰 *Stake:* `${amount:.2f}`\n"
-                        f"🎯 *Side:* `{signal}`\n"
+                        f"🎯 *Side:* `{side_name}`\n"
+                        f"💵 *Avg Price:* `{price_str}`\n"
+                        f"📊 *Shares Acquired:* `{shares_str}`\n"
+                        f"🏷 *Token:* `{token_id[:8]}...{token_id[-8:]}`\n"
                         f"🔢 *Step:* {self.martingale_step + 1}"
                     )
+                    send_telegram_notification(notif_msg)
                     
             # Mark as processed whether order succeeded or failed/skipped to prevent spamming
             self.last_processed_candle = last_candle_time

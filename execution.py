@@ -7,6 +7,10 @@ from web3 import Web3
 import json
 
 import config  # type: ignore
+import time
+from risk_manager import validate_bet  # type: ignore
+import os
+import requests
 
 # Constants for Redemption
 CONDITIONAL_TOKENS_ABI = '[{"constant":false,"inputs":[{"name":"collateralToken","type":"address"},{"name":"parentCollectionId","type":"bytes32"},{"name":"conditionId","type":"bytes32"},{"name":"indexSets","type":"uint256[]"}],"name":"redeemPositions","outputs":[],"payable":false,"stateMutability":"nonpayable","type":"function"}]'
@@ -51,35 +55,91 @@ def redeem_all_funds(client):
     Uses Web3 to interact with the ConditionalTokens contract.
     """
     if config.DRY_RUN:
-        print("\033[96m[DRY RUN] Would attempt to redeem winning positions...\033[0m")
-        return True
-
+        print("\033[96m[DRY RUN] Scanning positions for redemption...\033[0m")
+        # In dry run, we still check positions but don't send TX
+        
     if not client:
         return False
 
     try:
-        # 1. Fetch current open positions/notifications to find winnable markets
-        # In Polymarket, winning shares must be redeemed.
-        # This is a simplified version: we call redeem for available assets.
-        
-        # Note: A full implementation requires tracking every conditionId.
-        # For this bot, we will notify the user or attempt a broad redeem if possible.
-        # However, precise redemption requires keeping track of condition_ids.
-        
-        # Alternative: We check 'notifications' from Polymarket API
-        notifications = client.get_notifications()
-        if not notifications:
-            return True # Nothing to redeem
+        # 1. Fetch current positions
+        positions = client.get_positions()
+        if not positions:
+            return True
 
-        print("\033[94m[System] Checking for winning positions to cash out...\033[0m")
+        # Use a public Polygon RPC if none provided in env
+        rpc_url = os.getenv("RPC_URL", "https://polygon-rpc.com")
+        w3 = Web3(Web3.HTTPProvider(rpc_url))
         
-        # This part requires specific condition IDs. For now, we provide the logic template:
-        # w3 = Web3(Web3.HTTPProvider(config.RPC_URL)) 
-        # contract = w3.eth.contract(address=CONDITIONAL_TOKENS_ADDRESS, abi=json.loads(CONDITIONAL_TOKENS_ABI))
-        # ... logic to sign and send redeem transaction ...
+        if not w3.is_connected():
+            print("\033[91m[Cashout] Web3 connection failed. Skipping.\033[0m")
+            return False
+
+        account_addr = client.get_address()
+        contract = w3.eth.contract(address=Web3.to_checksum_address(CONDITIONAL_TOKENS_ADDRESS), abi=json.loads(CONDITIONAL_TOKENS_ABI))
         
-        # User requested terminal visibility, adding logs:
-        print("\033[92m[Cashout] Scan complete. No pending cashouts found.\033[0m")
+        # We need the collateral token address (USDC.e usually)
+        # Polymarket USDC.e: 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
+        collateral_token = Web3.to_checksum_address("0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174")
+
+        found_winnable = False
+        for pos in positions:
+            size = float(pos.get('size', 0))
+            if size < 0.1: continue
+            
+            token_id = pos.get('asset_id')
+            # Extract market details to get conditionId
+            try:
+                # We can use the Gamma API or CLOB to get market info
+                m_info = client.get_market(token_id)
+                condition_id = m_info.get('condition_id')
+                if not condition_id: continue
+                
+                # Check status via Gamma
+                slug = m_info.get('slug')
+                gr = requests.get(f"{config.GAMMA_API}/markets?slug={slug}", timeout=5)
+                gdata = gr.json()
+                if not gdata or not gdata[0].get('closed'):
+                    continue # Still trading
+                
+                # If closed, attempt redemption
+                # indexSets for binary markets: [1] for YES/UP, [2] for NO/DOWN
+                # We try both just in case, or we could determine side from token_id
+                index_sets = [1, 2] 
+                
+                print(f"\033[94m[Cashout] Found winnable shares for {slug}. Redeeming...\033[0m")
+                
+                if config.DRY_RUN:
+                    print(f"\033[96m[DRY RUN] Would redeem {size} shares for {slug}\033[0m")
+                    found_winnable = True
+                    continue
+
+                # Build transaction
+                nonce = w3.eth.get_transaction_count(Web3.to_checksum_address(account_addr))
+                tx = contract.functions.redeemPositions(
+                    collateral_token,
+                    "0x" + "0" * 64, # parentCollectionId (usually 0)
+                    Web3.to_bytes(hexstr=condition_id),
+                    index_sets
+                ).build_transaction({
+                    'from': Web3.to_checksum_address(account_addr),
+                    'nonce': nonce,
+                    'gas': 200000,
+                    'gasPrice': w3.eth.gas_price
+                })
+                
+                signed_tx = w3.eth.account.sign_transaction(tx, private_key=config.PRIVATE_KEY)
+                tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+                print(f"\033[92m[Cashout] Success! TX: {tx_hash.hex()}\033[0m")
+                found_winnable = True
+            except Exception as e:
+                # print(f"Redeem skip for {token_id}: {e}")
+                continue
+                
+        if not found_winnable:
+            # print("\033[94m[Cashout] Scan complete. No positions ready for payout.\033[0m")
+            pass
+            
         return True
     except Exception as e:
         print(f"\033[91m[Cashout Error] {e}\033[0m")
@@ -144,13 +204,19 @@ def place_market_order(client, token_id, amount, side_name):
                 f"🏷 *Token:* `{token_id[:8]}...{token_id[-8:]}`"
             )
             send_telegram_notification(notif_msg)
-            return True
+            
+            details = {
+                "avg_price": avg_price,
+                "shares_acquired": size_matched,
+                "side_name": side_name
+            }
+            return True, details
         else:
             err_msg = resp.get('error')
             print(f"\033[91mOrder Failed: {err_msg}\033[0m")
             from telegram_bot import send_telegram_notification  # type: ignore
             send_telegram_notification(f"❌ *Trade Failed*\n\n*Reason:* {err_msg}")
-            return False
+            return False, {}
     except Exception as e:
         print(f"\033[91mOrder Error: {e}\033[0m")
         from telegram_bot import send_telegram_notification  # type: ignore
@@ -206,7 +272,6 @@ def place_limit_order(client, token_id, amount, price, side_name, is_buy=True):
         resp = client.post_order(signed_order, orderType=OrderType.GTC)
         
         if resp and resp.get("success"):
-            order_id = resp.get("orderID")
             action_str = "BOUGHT" if is_buy else "SOLD"
             
             from datetime import datetime
@@ -227,15 +292,15 @@ def place_limit_order(client, token_id, amount, price, side_name, is_buy=True):
                 f"🏷 *Token:* `{token_id[:8]}...{token_id[-8:]}`"
             )
             send_telegram_notification(notif_msg)
-            return True
+            return True, {"price": price, "shares": shares, "side": side_name}
         else:
             err_msg = resp.get('error') if resp else "Unknown API Error"
             print(f"\033[91mLimit Order Failed: {err_msg}\033[0m")
             from telegram_bot import send_telegram_notification  # type: ignore
             send_telegram_notification(f"❌ *Limit Order Failed*\n\n*Reason:* {err_msg}")
-            return False
+            return False, {}
     except Exception as e:
         print(f"\033[91mLimit Order Error: {e}\033[0m")
         from telegram_bot import send_telegram_notification  # type: ignore
         send_telegram_notification(f"⚠️ *Limit Trade Error*\n\n`{str(e)}`")
-        return False
+        return False, {}

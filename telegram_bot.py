@@ -46,6 +46,7 @@ def run_telegram_bot(mc):
         now = datetime.now().strftime("%H:%M:%S")
         status_icon = "🟢 RUNNING" if mc.bot_mode == "AUTO" else "🔴 STOPPED"
         strat_name = "🛡️ SAFE MODE" if mc.martingale_type == "LINEAR" else "🚀 HIGH PROFIT"
+        cashout_status = "✅ AUTO" if mc.auto_redeem_enabled else "❌ MANUAL"
         
         return (
             f"🤖 *MY TRADING BOT*\n"
@@ -53,7 +54,7 @@ def run_telegram_bot(mc):
             f"⚡ *Status:* `{status_icon}`\n"
             f"🎯 *Strategy:* `{strat_name}`\n"
             f"💰 *Balance:* `${mc.current_balance:,.2f}`\n"
-            f"💸 *Profit Today:* `${mc.daily_pnl:,.2f}`\n"
+            f"🤖 *Auto Cashout:* `{cashout_status}`\n"
             f"──────────────────\n"
             f"🕒 `{now}`\n"
         )
@@ -73,6 +74,12 @@ def run_telegram_bot(mc):
             InlineKeyboardButton("🚀 HIGH PROFIT (1,3,9)", callback_data="switch_martingale_TRIPLE")
         )
         
+        # Cashout Actions
+        markup.row(
+            InlineKeyboardButton("💰 Cashout Now", callback_data="manual_cashout"),
+            InlineKeyboardButton(f"🤖 Auto Cash: {'ON' if mc.auto_redeem_enabled else 'OFF'}", callback_data="toggle_auto_cashout")
+        )
+
         # Secondary actions
         markup.row(
             InlineKeyboardButton("📈 Trade 5m", callback_data="nav_trade_5m"),
@@ -212,6 +219,25 @@ def run_telegram_bot(mc):
         success, msg = mc.set_strategies_mode(mode)
         bot.answer_callback_query(call.id, msg, show_alert=True)
         nav_handler(NavCall('nav_market_mode', call.message, call.id))
+
+    @bot.callback_query_handler(func=lambda call: call.data == "manual_cashout")
+    def manual_cashout_handler(call):
+        if not is_allowed(call.message): return
+        bot.answer_callback_query(call.id, "⏳ Scanning for winning positions to cash out...")
+        # Trigger redemption
+        success = execution.redeem_all_funds(mc.client)
+        if success:
+            bot.answer_callback_query(call.id, "✅ Cashout scan complete!", show_alert=True)
+        else:
+            bot.answer_callback_query(call.id, "❌ Cashout failed. Check terminal.", show_alert=True)
+        nav_handler(NavCall('nav_home', call.message, call.id))
+
+    @bot.callback_query_handler(func=lambda call: call.data == "toggle_auto_cashout")
+    def toggle_auto_cashout_handler(call):
+        if not is_allowed(call.message): return
+        success, msg = mc.toggle_auto_redeem()
+        bot.answer_callback_query(call.id, msg, show_alert=True)
+        nav_handler(NavCall('nav_home', call.message, call.id))
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith('switch_martingale_'))
     def switch_martingale_handler(call):

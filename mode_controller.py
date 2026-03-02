@@ -1,7 +1,7 @@
 import os
 import time
 import config  # type: ignore
-from execution import get_client, check_balance  # type: ignore
+from execution import get_client, check_balance, redeem_all_funds  # type: ignore
 from strategy_5m import Strategy5M  # type: ignore
 from strategy_15m import Strategy15M  # type: ignore
 
@@ -34,6 +34,8 @@ class ModeController:
         self.martingale_type = config.DEFAULT_MARTINGALE_TYPE
         self.active_strategies = "BOTH"  # "5M", "15M", "BOTH"
         
+        self.last_redeem_time = 0
+        self.auto_redeem_enabled = True
         self.running = True
 
     def initialize(self):
@@ -100,6 +102,12 @@ class ModeController:
         
         desc = "Linear ($1, $2, $3)" if m_type == "LINEAR" else "Triple ($1, $3, $9)"
         return True, f"🤖 Betting System set to: {desc}"
+        
+    def toggle_auto_redeem(self):
+        """Toggle the automatic redemption loop."""
+        self.auto_redeem_enabled = not self.auto_redeem_enabled
+        status = "ENABLED ✅" if self.auto_redeem_enabled else "DISABLED ❌"
+        return True, f"🤖 Auto Cashout is now {status}"
 
     def get_dashboard_layout(self):
         """
@@ -115,8 +123,17 @@ class ModeController:
     def process_cycle(self):
         """Called periodically by the main thread."""
         if self.client:
+            # 1. Update Balance & Strategy Processing
             self.current_balance = check_balance(self.client)
             if self.strategy_5m.enabled:
                 self.strategy_5m.process(self.client, self.data_5m, self.current_balance, self.bot_mode)
             if self.strategy_15m.enabled:
                 self.strategy_15m.process(self.client, self.data_15m, self.current_balance, self.bot_mode)
+            
+            # 2. Periodic Auto-Redemption (Every 3 minutes)
+            if self.auto_redeem_enabled:
+                now = time.time()
+                if now - self.last_redeem_time > 180:
+                    print(f"{CYAN}[System] Triggering periodic auto-redemption...{RESET}")
+                    redeem_all_funds(self.client)
+                    self.last_redeem_time = int(now)
