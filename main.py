@@ -119,7 +119,24 @@ def fetch_market_data(mc, timeframe="5m", interval_seconds=300):
             # print(f"Fetch error: {e}")
             pass
             
-        time.sleep(15)
+        time.sleep(5)  # Fast refresh: 5 seconds
+
+def daily_summary_scheduler(mc):
+    """Send daily summary at 23:59 and reset stats"""
+    from telegram_bot import send_telegram_notification  # type: ignore
+    while mc.running:
+        now = datetime.now()
+        if now.hour == 23 and now.minute == 59 and not mc.daily_report_sent:
+            try:
+                summary = mc.get_daily_summary()
+                send_telegram_notification(summary)
+                mc.daily_report_sent = True
+            except Exception as e:
+                print(f"[Daily Report Error]: {e}")
+        elif now.hour == 0 and now.minute == 0 and mc.daily_report_sent:
+            # Reset flag at midnight for next day
+            mc.daily_report_sent = False
+        time.sleep(30)  # Check every 30 seconds
 
 def main():
     print("Starting Polymarket dual-mode bot...")
@@ -136,6 +153,9 @@ def main():
     
     # Start Telegram bot listener thread
     threading.Thread(target=run_telegram_bot, args=(mc,), daemon=True).start()
+    
+    # Start daily summary scheduler
+    threading.Thread(target=daily_summary_scheduler, args=(mc,), daemon=True).start()
     
     # Give threads a moment to fetch initial data
     time.sleep(5)

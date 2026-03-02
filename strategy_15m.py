@@ -101,9 +101,13 @@ class Strategy15M:
             
             if won:
                 self.wins += 1
+                payout = self.active_shares
                 # Simulated Payout
                 if config.DRY_RUN:
-                    self.mc.update_virtual_pnl(self.active_shares, is_win=True)
+                    self.mc.update_virtual_pnl(payout, is_win=True)
+                
+                net_pnl = payout - self.active_bet_amount
+                self.mc.add_trade("15m", bet_direction, self.active_bet_amount, "WIN", net_pnl)
                     
                 self.martingale_step = 0
                 self.active_bet_slug = ""
@@ -112,19 +116,36 @@ class Strategy15M:
                 self.active_bet_amount = 0.0
                 self.active_shares = 0.0
                 from telegram_bot import send_telegram_notification  # type: ignore
-                send_telegram_notification(f"🏆 *Trade Won! (15m)*\n\n*Direction:* {bet_direction}\n*Wins:* {self.wins} | *Losses:* {self.losses}")
+                send_telegram_notification(
+                    f"🏆🏆 *WIN! (15m)* 🏆🏆\n\n"
+                    f"🎯 *Direction:* `{bet_direction}`\n"
+                    f"💰 *Payout:* `+${payout:.2f}`\n"
+                    f"📈 *Net PnL:* `+${net_pnl:.2f}`\n"
+                    f"💳 *Balance:* `${self.mc.current_balance:,.2f}`\n"
+                    f"✅ W: `{self.wins}` | ❌ L: `{self.losses}`"
+                )
             else:
                 self.losses += 1
+                loss_amount = self.active_bet_amount
+                self.mc.add_trade("15m", bet_direction, loss_amount, "LOSS", -loss_amount)
+                
                 self.martingale_step += 1
                 if self.martingale_step >= config.MAX_PROGRESSION_STEPS:
                     self.martingale_step = 0
+                next_stake = self.get_current_bet_amount()
                 self.active_bet_slug = ""
                 self.active_bet_side = ""
                 self.active_bet_expiry = 0
                 self.active_bet_amount = 0.0
                 self.active_shares = 0.0
                 from telegram_bot import send_telegram_notification  # type: ignore
-                send_telegram_notification(f"💔 *Trade Lost (15m)*\n\n*Direction:* {bet_direction}\n*Next Stake:* ${self.get_current_bet_amount():.2f} (Step {self.martingale_step + 1})")
+                send_telegram_notification(
+                    f"🔴 *LOSS (15m)* 🔴\n\n"
+                    f"🎯 *Direction:* `{bet_direction}`\n"
+                    f"💸 *Lost:* `-${loss_amount:.2f}`\n"
+                    f"💳 *Balance:* `${self.mc.current_balance:,.2f}`\n"
+                    f"➡️ *Next:* `${next_stake:.2f}` (Step {self.martingale_step + 1})"
+                )
 
         # ──── ACTIVE BET GUARD ────
         if self.active_bet_slug:

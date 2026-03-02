@@ -144,8 +144,11 @@ def run_telegram_bot(mc):
         markup = InlineKeyboardMarkup(row_width=2)
         markup.add(
             InlineKeyboardButton("💰 Set Base Bet", callback_data="set_base_bet"),
-            InlineKeyboardButton("🕒 Market Mode", callback_data="nav_market_mode"),
-            InlineKeyboardButton("📊 Detailed Status", callback_data="nav_status")
+            InlineKeyboardButton("🕒 Market Mode", callback_data="nav_market_mode")
+        )
+        markup.add(
+            InlineKeyboardButton("📝 Trade History", callback_data="nav_trade_history"),
+            InlineKeyboardButton("📊 Daily Report", callback_data="nav_daily_report")
         )
         if config.DRY_RUN:
             markup.add(
@@ -208,7 +211,19 @@ def run_telegram_bot(mc):
                     InlineKeyboardButton("💰 Set Custom Balance", callback_data="set_sim_bal"),
                     InlineKeyboardButton("⬅️ Back", callback_data="nav_settings")
                 )
-                bot.edit_message_text(f"⚙️ *Simulation Settings*\n\nFees and slippage make the dry-run more realistic by simulating market impact and costs.", 
+                bot.edit_message_text(f"⚙️ *Simulation Settings*\n\nFees and slippage make the dry-run more realistic.", 
+                                     chat_id=call.message.chat.id, message_id=call.message.message_id,
+                                     reply_markup=markup, parse_mode="Markdown")
+            elif page == "trade_history":
+                markup = InlineKeyboardMarkup()
+                markup.add(InlineKeyboardButton("⬅️ Back", callback_data="nav_settings"))
+                bot.edit_message_text(mc.get_trade_history_text(), 
+                                     chat_id=call.message.chat.id, message_id=call.message.message_id,
+                                     reply_markup=markup, parse_mode="Markdown")
+            elif page == "daily_report":
+                markup = InlineKeyboardMarkup()
+                markup.add(InlineKeyboardButton("⬅️ Back", callback_data="nav_settings"))
+                bot.edit_message_text(mc.get_daily_summary(), 
                                      chat_id=call.message.chat.id, message_id=call.message.message_id,
                                      reply_markup=markup, parse_mode="Markdown")
             elif page == "status":

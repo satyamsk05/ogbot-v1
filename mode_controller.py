@@ -1,6 +1,7 @@
 import os
 import time
 import config  # type: ignore
+from datetime import datetime
 from execution import get_client, check_balance, redeem_all_funds  # type: ignore
 from strategy_5m import Strategy5M  # type: ignore
 from strategy_15m import Strategy15M  # type: ignore
@@ -44,6 +45,14 @@ class ModeController:
         self.sim_stake = 0.0
         self.sim_slippage = 0.005  # 0.5% default slippage
         self.sim_fees = 0.001      # 0.1% default fees
+        
+        # Trade History (last 20 trades)
+        self.trade_history = []
+        self.MAX_HISTORY = 20
+        
+        # Daily Summary
+        self.daily_report_sent = False
+        
         self.last_redeem_time = 0
         self.auto_redeem_enabled = True
         self.running = True
@@ -158,6 +167,62 @@ class ModeController:
             self.current_balance = self.virtual_balance
             # Update Daily PnL
             self.daily_pnl = self.virtual_balance - config.VIRTUAL_START_BALANCE
+
+    def add_trade(self, timeframe: str, side: str, amount: float, result: str, pnl: float):
+        """Add a trade to history"""
+        entry = {
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "tf": timeframe,
+            "side": side,
+            "amount": amount,
+            "result": result,  # "WIN" or "LOSS"
+            "pnl": pnl,
+            "balance": self.current_balance
+        }
+        self.trade_history.append(entry)
+        if len(self.trade_history) > self.MAX_HISTORY:
+            self.trade_history.pop(0)
+
+    def get_daily_summary(self):
+        """Generate daily summary text"""
+        s5 = self.strategy_5m
+        s15 = self.strategy_15m
+        total_w = s5.wins + s15.wins
+        total_l = s5.losses + s15.losses
+        total_t = total_w + total_l
+        win_rate = (total_w / total_t * 100) if total_t > 0 else 0
+        bal_tag = " [SIM]" if config.DRY_RUN else ""
+        pnl_sign = "+" if self.daily_pnl >= 0 else ""
+        pnl_icon = "🟢" if self.daily_pnl >= 0 else "🔴"
+        
+        summary = (
+            f"📊 *Daily Summary Report{bal_tag}*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"{pnl_icon} *PnL:* `{pnl_sign}${self.daily_pnl:,.2f}`\n"
+            f"💰 *Balance:* `${self.current_balance:,.2f}`\n\n"
+            f"🏆 *Win Rate:* `{win_rate:.1f}%`\n"
+            f"✅ *Wins:* `{total_w}`  |  ❌ *Losses:* `{total_l}`\n"
+            f"💸 *Total Volume:* `${self.sim_stake:,.2f}`\n\n"
+            f"📈 *5m:* W `{s5.wins}` / L `{s5.losses}`\n"
+            f"📉 *15m:* W `{s15.wins}` / L `{s15.losses}`\n\n"
+            f"🕒 *Report Time:* `{datetime.now().strftime('%Y-%m-%d %H:%M')}`"
+        )
+        return summary
+
+    def get_trade_history_text(self):
+        """Format trade history for Telegram display"""
+        if not self.trade_history:
+            return "📝 *Trade History*\n\nNo trades yet."
+        
+        lines = ["📝 *Trade History (Last 20)*\n━━━━━━━━━━━━━━━━━━━━━━━━"]
+        for i, t in enumerate(reversed(self.trade_history), 1):
+            icon = "✅" if t['result'] == 'WIN' else "❌"
+            pnl_sign = "+" if t['pnl'] >= 0 else ""
+            lines.append(
+                f"`{t['time']}` {icon} {t['tf']} {t['side']} "
+                f"`${t['amount']:.2f}` → `{pnl_sign}${t['pnl']:.2f}`"
+            )
+        return "\n".join(lines)
 
     def set_virtual_balance(self, amount):
         """Manual reset to custom amount"""
