@@ -91,6 +91,9 @@ class Strategy15M:
             else:
                 won = prev_candle['close'] < beat_p
                   
+            # Save bet info BEFORE clearing for notification
+            bet_direction = self.active_bet_side
+            
             if won:
                 self.wins += 1
                 self.martingale_step = 0
@@ -98,7 +101,7 @@ class Strategy15M:
                 self.active_bet_side = ""
                 self.active_bet_expiry = 0
                 from telegram_bot import send_telegram_notification  # type: ignore
-                send_telegram_notification(f"🏆 *Trade Won! (15m)*\n\n*Direction:* {self.active_bet_side}\n*Wins:* {self.wins} | *Losses:* {self.losses}")
+                send_telegram_notification(f"🏆 *Trade Won! (15m)*\n\n*Direction:* {bet_direction}\n*Wins:* {self.wins} | *Losses:* {self.losses}")
             else:
                 self.losses += 1
                 self.martingale_step += 1
@@ -108,7 +111,7 @@ class Strategy15M:
                 self.active_bet_side = ""
                 self.active_bet_expiry = 0
                 from telegram_bot import send_telegram_notification  # type: ignore
-                send_telegram_notification(f"💔 *Trade Lost (15m)*\n\n*Direction:* {self.active_bet_side}\n*Next Stake:* ${self.get_current_bet_amount():.2f} (Step {self.martingale_step + 1})")
+                send_telegram_notification(f"💔 *Trade Lost (15m)*\n\n*Direction:* {bet_direction}\n*Next Stake:* ${self.get_current_bet_amount():.2f} (Step {self.martingale_step + 1})")
 
         # ──── ACTIVE BET GUARD ────
         if self.active_bet_slug:

@@ -7,7 +7,6 @@ from web3 import Web3
 import json
 
 import config  # type: ignore
-import time
 from risk_manager import validate_bet  # type: ignore
 import os
 import requests
@@ -166,11 +165,11 @@ def place_market_order(client, token_id, amount, side_name):
     
     if config.DRY_RUN:
         print(f"\033[96m[DRY RUN] Simulation: BOUGHT ${amount} on {side_name}\033[0m")
-        return True
+        return True, {"avg_price": 0.50, "shares_acquired": amount / 0.50, "side_name": side_name}
         
     if not client:
         print("\033[91m[ERROR] Client not initialized!\033[0m")
-        return False
+        return False, {}
         
     try:
         order = client.create_market_order(MarketOrderArgs(
@@ -185,7 +184,12 @@ def place_market_order(client, token_id, amount, side_name):
         if resp.get("success"):
             order_id = resp.get("orderID")
             print(f"\033[92m\033[1m[SUCCESS] Trade Placed! Stake: ${amount:.2f} | Side: {side_name}\033[0m")
-            # ... existing logic ...
+            
+            # Initialize with defaults
+            avg_price = 0.50
+            size_matched = amount / 0.50
+            price_str = f"${avg_price:.3f}"
+            shares_str = f"{size_matched:.2f}"
             
             try:
                 # Attempt to fetch exact execution details
@@ -234,7 +238,7 @@ def place_market_order(client, token_id, amount, side_name):
         print(f"\033[91mOrder Error: {e}\033[0m")
         from telegram_bot import send_telegram_notification  # type: ignore
         send_telegram_notification(f"⚠️ *Trade Error*\n\n`{str(e)}`")
-        return False
+        return False, {}
 
 def place_limit_order(client, token_id, amount, price, side_name, is_buy=True):
     """
