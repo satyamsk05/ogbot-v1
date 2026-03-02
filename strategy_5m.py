@@ -15,8 +15,13 @@ class Strategy5M:
         self.last_processed_candle = ""
         self.wins = 0
         self.losses = 0
-        self.next_planned_bet = "None"
+        self.next_planned_bet = "Warming up..."
         self.enabled = True
+        
+        # Warmup: Bot must observe at least 3 fresh candle changes before auto-betting
+        self.candles_observed = 0
+        self.is_warmed_up = False
+        self.MIN_CANDLES_TO_WARMUP = 3
         
     def reset_progression(self):
         self.martingale_step = 0
@@ -24,6 +29,9 @@ class Strategy5M:
         self.active_bet_side = ""
         self.active_bet_expiry = 0
         self.next_planned_bet = "None"
+        # Also reset warmup so bot re-observes candles
+        self.candles_observed = 0
+        self.is_warmed_up = False
         
     def get_current_bet_amount(self):
         if self.martingale_type == "TRIPLE":
@@ -33,28 +41,50 @@ class Strategy5M:
             # Linear progression: 1, 2, 3, 4, ...
             return self.base_bet_amount * (self.martingale_step + 1)
 
+    def get_candle_sequence_display(self, candles):
+        """Returns emoji sequence of last few candles for display."""
+        if not candles:
+            return "No data"
+        last_n = candles[-4:] if len(candles) >= 4 else candles
+        return " ".join(["🔴" if c['color'] == "RED" else "🟢" for c in last_n])
+
     def process(self, client, live_data, current_balance, bot_mode):
         """
-        live_data format:
-        {
-            "candles": [...],
-            "current_slug": "btc-updown-5m-...",
-            "up_token": "...",
-            "down_token": "..."
-        }
+        Multi-Martingale Auto-Betting Strategy for 5-minute markets.
+        
+        RULES:
+        1. Wait for 3 consecutive same-color candles
+        2. Bet OPPOSITE on the 4th candle
+        3. If loss, increase stake (martingale)
+        4. If win, reset to base stake
+        5. Don't bet if already have an active bet
+        6. Don't bet immediately on startup (warmup period)
         """
-        if not live_data['candles'] or len(live_data['candles']) < 2:
-            self.next_planned_bet = "None"
+        if not live_data['candles'] or len(live_data['candles']) < 3:
+            self.next_planned_bet = "⏳ Waiting for candle data..."
             return
             
         last_candle_time = live_data['candles'][-1]['time']
         
-        # Check if we won/lost the previous bet
+        # ──── WARMUP LOGIC ────
+        # Track candle changes to ensure we've observed enough fresh data
+        if not self.is_warmed_up:
+            if self.last_processed_candle and self.last_processed_candle != last_candle_time:
+                self.candles_observed += 1
+            if self.candles_observed >= self.MIN_CANDLES_TO_WARMUP:
+                self.is_warmed_up = True
+                print(f"\033[92m[5m] Warmup complete! Auto-betting is now active.\033[0m")
+            else:
+                remaining = self.MIN_CANDLES_TO_WARMUP - self.candles_observed
+                self.next_planned_bet = f"⏳ Warming up ({remaining} candles left)"
+                self.last_processed_candle = last_candle_time
+                return
+        
+        # ──── WIN/LOSS CHECK ────
         now = time.time()
         if self.active_bet_slug and now > (self.active_bet_expiry + 30):
             # 30s buffer after expiry to let API update
             prev_candle = live_data['candles'][-1]
-            # Use beat_price vs current candle if available for better accuracy
             beat_p = live_data.get('beat_price', 0)
             
             won = False
@@ -65,33 +95,46 @@ class Strategy5M:
                   
             if won:
                 self.wins += 1
-                self.reset_progression()
+                self.martingale_step = 0  # Reset step but keep warmup
+                self.active_bet_slug = ""
+                self.active_bet_side = ""
+                self.active_bet_expiry = 0
                 from telegram_bot import send_telegram_notification  # type: ignore
-                send_telegram_notification(f"🏆 *Trade Won! (5m)*\n\n*Market:* `{self.active_bet_slug}`\n*Direction:* {self.active_bet_side}")
+                send_telegram_notification(f"🏆 *Trade Won! (5m)*\n\n*Direction:* {self.active_bet_side}\n*Wins:* {self.wins} | *Losses:* {self.losses}")
             else:
                 self.losses += 1
                 self.martingale_step += 1
                 if self.martingale_step >= config.MAX_PROGRESSION_STEPS:
-                    self.martingale_step = 0 
+                    self.martingale_step = 0  # Safety reset
+                self.active_bet_slug = ""
+                self.active_bet_side = ""
+                self.active_bet_expiry = 0
                 from telegram_bot import send_telegram_notification  # type: ignore
-                send_telegram_notification(f"💔 *Trade Lost (5m)*\n\n*Market:* `{self.active_bet_slug}`\n*Direction:* {self.active_bet_side}\n*Martingale Step:* {self.martingale_step}")
-            
-            self.active_bet_slug = ""
-            self.active_bet_side = ""
-            self.active_bet_expiry = 0
+                send_telegram_notification(f"💔 *Trade Lost (5m)*\n\n*Direction:* {self.active_bet_side}\n*Next Stake:* ${self.get_current_bet_amount():.2f} (Step {self.martingale_step + 1})")
 
-        # Determine signal based on rules: 5m: two RED -> bet GREEN (UP)
-        last2 = [c['color'] for c in live_data['candles'][-2:]]
+        # ──── ACTIVE BET GUARD ────
+        # If we already have a bet running, don't place another
+        if self.active_bet_slug:
+            self.next_planned_bet = f"⏳ Bet active on {self.active_bet_side}, waiting..."
+            self.last_processed_candle = last_candle_time
+            return
+
+        # ──── SIGNAL DETECTION (3-CANDLE PATTERN) ────
+        last3 = [c['color'] for c in live_data['candles'][-3:]]
         signal = ""
-        if all(x == "RED" for x in last2):
-            signal = "UP"
+        if all(x == "RED" for x in last3):
+            signal = "UP"    # 3 RED candles → bet GREEN (UP)
+        elif all(x == "GREEN" for x in last3):
+            signal = "DOWN"  # 3 GREEN candles → bet RED (DOWN)
             
         amount = self.get_current_bet_amount()
         
         if signal:
-            self.next_planned_bet = f"{'GREEN' if signal == 'UP' else 'RED'} ${amount:.2f}"
+            direction = "🟢 GREEN" if signal == "UP" else "🔴 RED"
+            self.next_planned_bet = f"{direction} ${amount:.2f} (Step {self.martingale_step + 1})"
         else:
-            self.next_planned_bet = "None"
+            seq = self.get_candle_sequence_display(live_data['candles'])
+            self.next_planned_bet = f"Watching: {seq}"
 
         # If we have already processed this candle, return
         if self.last_processed_candle == last_candle_time:
@@ -101,13 +144,19 @@ class Strategy5M:
             # Check risk limits safely
             is_valid, reason = validate_bet(amount, current_balance)
             if not is_valid:
-                # Can't bet due to risk limits
-                pass
+                self.next_planned_bet = f"⚠️ Risk limit: {reason}"
             else:
                 token_id = live_data['up_token'] if signal == "UP" else live_data['down_token']
                 
-                # Call place_market_order and get detailed results
-                success, order_details = place_market_order(client, token_id, amount, signal)
+                if not token_id:
+                    self.next_planned_bet = "⚠️ Market data not ready"
+                    self.last_processed_candle = last_candle_time
+                    return
+                
+                # Place the order
+                result = place_market_order(client, token_id, amount, signal)
+                success = result[0] if isinstance(result, tuple) else result
+                order_details = result[1] if isinstance(result, tuple) and len(result) > 1 else {}
                 
                 if success:
                     self.active_bet_slug = live_data['current_slug']
@@ -119,29 +168,28 @@ class Strategy5M:
                         self.active_bet_expiry = int(time.time() + 300)
                         
                     # Extract details for notification
-                    side_name = order_details.get('side_name', signal)
-                    price_str = f"{order_details.get('avg_price', 0):.4f}"
-                    shares_str = f"{order_details.get('shares_acquired', 0):.2f}"
+                    side_name = order_details.get('side_name', signal) if isinstance(order_details, dict) else signal
+                    price_str = f"{order_details.get('avg_price', 0):.4f}" if isinstance(order_details, dict) else "N/A"
+                    shares_str = f"{order_details.get('shares_acquired', 0):.2f}" if isinstance(order_details, dict) else "N/A"
                     
                     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    seq_display = self.get_candle_sequence_display(live_data['candles'])
                     
                     # Send Telegram notification with detailed info
                     from telegram_bot import send_telegram_notification  # type: ignore
                     notif_msg = (
-                        f"🤖 *Auto Trade Placed (5m)*\n\n"
+                        f"🤖 *Auto Trade (5m)*\n\n"
+                        f"📊 *Pattern:* `{seq_display} → {signal}`\n"
                         f"⏱ *Time:* `{now_str}`\n"
-                        f"📦 *Market:* `{self.active_bet_slug}`\n"
                         f"💰 *Stake:* `${amount:.2f}`\n"
                         f"🎯 *Side:* `{side_name}`\n"
                         f"💵 *Avg Price:* `{price_str}`\n"
-                        f"📊 *Shares Acquired:* `{shares_str}`\n"
-                        f"🏷 *Token:* `{token_id[:8]}...{token_id[-8:]}`\n"
-                        f"🔢 *Step:* {self.martingale_step + 1}"
+                        f"📊 *Shares:* `{shares_str}`\n"
+                        f"🔢 *Martingale Step:* {self.martingale_step + 1}"
                     )
                     send_telegram_notification(notif_msg)
                     
-            # Mark as processed whether order succeeded or failed/skipped to prevent spamming
+            # Mark as processed
             self.last_processed_candle = last_candle_time
         elif not signal:
-            # Mark processed to avoid unnecessary checks
             self.last_processed_candle = last_candle_time

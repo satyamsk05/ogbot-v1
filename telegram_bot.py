@@ -45,18 +45,29 @@ def run_telegram_bot(mc):
     def get_header():
         now = datetime.now().strftime("%H:%M:%S")
         status_icon = "🟢 RUNNING" if mc.bot_mode == "AUTO" else "🔴 STOPPED"
-        strat_name = "🛡️ SAFE MODE" if mc.martingale_type == "LINEAR" else "🚀 HIGH PROFIT"
+        strat_name = "🛡️ SAFE" if mc.martingale_type == "LINEAR" else "🚀 HIGH PROFIT"
         cashout_status = "✅ AUTO" if mc.auto_redeem_enabled else "❌ MANUAL"
+        
+        # Live strategy state
+        s5 = mc.strategy_5m
+        s15 = mc.strategy_15m
+        
+        seq_5m = s5.get_candle_sequence_display(mc.data_5m.get('candles', []))
+        seq_15m = s15.get_candle_sequence_display(mc.data_15m.get('candles', []))
         
         return (
             f"🤖 *MY TRADING BOT*\n"
             f"──────────────────\n"
             f"⚡ *Status:* `{status_icon}`\n"
-            f"🎯 *Strategy:* `{strat_name}`\n"
-            f"💰 *Balance:* `${mc.current_balance:,.2f}`\n"
-            f"🤖 *Auto Cashout:* `{cashout_status}`\n"
+            f"🎯 *Strategy:* `{strat_name}` | 💰 `${mc.current_balance:,.2f}`\n"
+            f"🤖 *Cashout:* `{cashout_status}`\n"
             f"──────────────────\n"
-            f"🕒 `{now}`\n"
+            f"📊 *5m:* {seq_5m}\n"
+            f"   → `{s5.next_planned_bet}`\n"
+            f"📊 *15m:* {seq_15m}\n"
+            f"   → `{s15.next_planned_bet}`\n"
+            f"──────────────────\n"
+            f"📈 W: `{s5.wins + s15.wins}` | L: `{s5.losses + s15.losses}` | 🕒 `{now}`\n"
         )
 
     def main_menu_markup():
@@ -180,13 +191,18 @@ def run_telegram_bot(mc):
                                      chat_id=call.message.chat.id, message_id=call.message.message_id,
                                      reply_markup=martingale_menu_markup(), parse_mode="Markdown")
             elif page == "status":
+                s5 = mc.strategy_5m
+                s15 = mc.strategy_15m
                 status_text = (
                     f"{get_header()}\n"
                     f"🔍 *Detailed Status:*\n"
-                    f"• Auto Strategy: `Active`\n"
-                    f"• Betting System: `{mc.martingale_type}`\n"
-                    f"• 5m Sequence: `{mc.data_5m.get('sequence', 'N/A')}`\n"
-                    f"• 15m Sequence: `{mc.data_15m.get('sequence', 'N/A')}`\n"
+                    f"• Betting: `{mc.martingale_type}`\n"
+                    f"• 5m Wins/Losses: `{s5.wins}/{s5.losses}`\n"
+                    f"• 15m Wins/Losses: `{s15.wins}/{s15.losses}`\n"
+                    f"• 5m Step: `{s5.martingale_step + 1}` ({s5.next_planned_bet})\n"
+                    f"• 15m Step: `{s15.martingale_step + 1}` ({s15.next_planned_bet})\n"
+                    f"• 5m Warmed Up: `{'✅' if s5.is_warmed_up else '❌'}`\n"
+                    f"• 15m Warmed Up: `{'✅' if s15.is_warmed_up else '❌'}`\n"
                     f"• Network: `Polygon Mainnet`"
                 )
                 markup = InlineKeyboardMarkup()
