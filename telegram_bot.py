@@ -44,9 +44,14 @@ def run_telegram_bot(mc):
     # --- UI Components ---
     def get_header():
         now = datetime.now().strftime("%H:%M:%S")
-        status_icon = "🟢 RUNNING" if mc.bot_mode == "AUTO" else "🔴 STOPPED"
-        strat_name = "🛡️ SAFE" if mc.martingale_type == "LINEAR" else "🚀 HIGH PROFIT"
-        cashout_status = "✅ AUTO" if mc.auto_redeem_enabled else "❌ MANUAL"
+        
+        # Status
+        if mc.bot_mode == "AUTO":
+            status_line = "⚡ `RUNNING`"
+        else:
+            status_line = "🔴 `STOPPED`"
+        
+        cashout_tag = "✅" if mc.auto_redeem_enabled else "❌"
         
         # Live strategy state
         s5 = mc.strategy_5m
@@ -55,60 +60,66 @@ def run_telegram_bot(mc):
         seq_5m = s5.get_candle_sequence_display(mc.data_5m.get('candles', []))
         seq_15m = s15.get_candle_sequence_display(mc.data_15m.get('candles', []))
         
-        # Display balance with Virtual tag if in dry run
-        bal_prefix = "💰 *BALANCE [VIRTUAL]:*" if config.DRY_RUN else "💰 *BALANCE:*"
+        # PnL color
+        pnl_val = mc.daily_pnl
+        pnl_icon = "🟢" if pnl_val >= 0 else "🔴"
+        pnl_sign = "+" if pnl_val >= 0 else ""
+        
+        # Balance label
+        bal_tag = " [SIM]" if config.DRY_RUN else ""
+        
+        # Total W/L
+        total_w = s5.wins + s15.wins
+        total_l = s5.losses + s15.losses
+        win_rate = (total_w / (total_w + total_l) * 100) if (total_w + total_l) > 0 else 0
+        
+        # Current step info
+        step_5m = s5.martingale_step + 1
+        step_15m = s15.martingale_step + 1
         
         header = (
-            f"🤖 *OGBot v1+ Dashboard*\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"🚦 *STATUS:* `{status_icon}`\n"
-            f"⚙️ *MODE:* `{strat_name}`\n"
-            f"🔄 *AUTO CASH:* `{cashout_status}`\n"
-            f"{bal_prefix} `${mc.current_balance:,.2f}`\n"
-            f"📈 *DAILY PnL:* `${mc.daily_pnl:,.2f}`\n\n"
-            f"──────────────────\n"
-            f"📊 *5m:* {seq_5m}\n"
-            f"   → `{s5.next_planned_bet}`\n"
-            f"📊 *15m:* {seq_15m}\n"
-            f"   → `{s15.next_planned_bet}`\n"
-            f"──────────────────\n"
-            f"📈 W: `{s5.wins + s15.wins}` | L: `{s5.losses + s15.losses}` | 🕒 `{now}`\n"
+            f"🤖 *OGBot v1+*  •  {status_line}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"💰 *Balance{bal_tag}:* `${mc.current_balance:,.2f}`\n"
+            f"{pnl_icon} *PnL:* `{pnl_sign}${pnl_val:,.2f}`  │  🏆 `{win_rate:.0f}%`\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📊 *5m* {seq_5m}\n"
+            f"    └ {s5.next_planned_bet}  (Step {step_5m})\n"
+            f"📊 *15m* {seq_15m}\n"
+            f"    └ {s15.next_planned_bet}  (Step {step_15m})\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"W `{total_w}` │ L `{total_l}` │ 💸 `${s5.base_bet_amount}` │ ⏰ `{now}`\n"
         )
         return header
 
     def main_menu_markup():
         markup = InlineKeyboardMarkup(row_width=2)
         
-        # Big Toggle Button
+        # Toggle Bot
         if mc.bot_mode == "MANUAL":
-            markup.row(InlineKeyboardButton("▶️ START BOT (Auto)", callback_data="set_mode_AUTO"))
+            markup.row(InlineKeyboardButton("▶️ START BOT", callback_data="set_mode_AUTO"))
         else:
             markup.row(InlineKeyboardButton("⏸ STOP BOT", callback_data="set_mode_MANUAL"))
-            
-        # Strategy Switching
-        markup.row(
-            InlineKeyboardButton("🛡️ SAFE (1,2,3)", callback_data="switch_martingale_LINEAR"),
-            InlineKeyboardButton("🚀 HIGH PROFIT (1,3,9)", callback_data="switch_martingale_TRIPLE")
-        )
         
-        # Cashout Actions
+        # Core Actions
         markup.row(
             InlineKeyboardButton("💰 Cashout Now", callback_data="manual_cashout"),
             InlineKeyboardButton(f"🤖 Auto Cash: {'ON' if mc.auto_redeem_enabled else 'OFF'}", callback_data="toggle_auto_cashout")
         )
 
-        # Secondary actions
+        # Trading
         markup.row(
             InlineKeyboardButton("📈 Trade 5m", callback_data="nav_trade_5m"),
             InlineKeyboardButton("📉 Trade 15m", callback_data="nav_trade_15m")
         )
         
+        # Bottom Row
         markup.row(
-            InlineKeyboardButton("💸 Withdraw $", callback_data="nav_transfer"),
-            InlineKeyboardButton("⚙️ More", callback_data="nav_settings")
+            InlineKeyboardButton("💸 Withdraw", callback_data="nav_transfer"),
+            InlineKeyboardButton("⚙️ Settings", callback_data="nav_settings")
         )
         
-        markup.row(InlineKeyboardButton("🔄 Refresh Dashboard", callback_data="nav_home"))
+        markup.row(InlineKeyboardButton("🔄 Refresh", callback_data="nav_home"))
         return markup
 
     def trade_menu_markup(timeframe):
@@ -143,15 +154,6 @@ def run_telegram_bot(mc):
             )
             
         markup.add(InlineKeyboardButton("⬅️ Back", callback_data="nav_home"))
-        return markup
-
-    def martingale_menu_markup():
-        markup = InlineKeyboardMarkup(row_width=1)
-        markup.add(
-            InlineKeyboardButton("📈 Linear ($1, $2, $3)", callback_data="switch_martingale_LINEAR"),
-            InlineKeyboardButton("🚀 Triple ($1, $3, $9)", callback_data="switch_martingale_TRIPLE"),
-            InlineKeyboardButton("⬅️ Back", callback_data="nav_settings")
-        )
         return markup
     
     def market_mode_markup():
@@ -198,10 +200,6 @@ def run_telegram_bot(mc):
                 bot.edit_message_text(get_header() + "\n🕒 *Choose Market Tracking:*", 
                                      chat_id=call.message.chat.id, message_id=call.message.message_id,
                                      reply_markup=market_mode_markup(), parse_mode="Markdown")
-            elif page == "martingale":
-                bot.edit_message_text(get_header() + "\n🤖 *Choose Betting System:*", 
-                                     chat_id=call.message.chat.id, message_id=call.message.message_id,
-                                     reply_markup=martingale_menu_markup(), parse_mode="Markdown")
             elif page == "sim_settings":
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(
@@ -334,14 +332,6 @@ def run_telegram_bot(mc):
         bot.answer_callback_query(call.id, msg, show_alert=True)
         nav_handler(NavCall('nav_home', call.message, call.id))
 
-    @bot.callback_query_handler(func=lambda call: call.data.startswith('switch_martingale_'))
-    def switch_martingale_handler(call):
-        if not is_allowed(call.message): return
-        m_type = call.data.replace("switch_martingale_", "")
-        success, msg = mc.set_martingale_type(m_type)
-        bot.answer_callback_query(call.id, msg, show_alert=True)
-        # Return to home to show updated status/buttons
-        nav_handler(NavCall('nav_home', call.message, call.id))
 
     @bot.callback_query_handler(func=lambda call: call.data == "set_base_bet")
     def set_base_bet_handler(call):

@@ -5,7 +5,7 @@ load_dotenv()
 
 # Operating Mode: "MANUAL" or "AUTO"
 BOT_MODE = os.getenv("BOT_MODE", "MANUAL").upper()
-DEFAULT_MARTINGALE_TYPE = os.getenv("DEFAULT_MARTINGALE_TYPE", "LINEAR").upper() # "LINEAR" or "TRIPLE"
+DEFAULT_MARTINGALE_TYPE = "TRIPLE"  # Only TRIPLE (3x) is supported
 
 # Limits and constraints
 MAX_SINGLE_BET = float(os.getenv("MAX_SINGLE_BET", "10.0"))

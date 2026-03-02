@@ -29,8 +29,8 @@ class ModeController:
         self.data_5m = {"candles": [], "current_slug": "", "up_token": None, "down_token": None, "market_name": "", "beat_price": 0.0}
         self.data_15m = {"candles": [], "current_slug": "", "up_token": None, "down_token": None, "market_name": "", "beat_price": 0.0}
         
-        self.strategy_5m = Strategy5M(mc=self, base_bet_amount=1.0, martingale_type=config.DEFAULT_MARTINGALE_TYPE)
-        self.strategy_15m = Strategy15M(mc=self, base_bet_amount=1.0, martingale_type=config.DEFAULT_MARTINGALE_TYPE)
+        self.strategy_5m = Strategy5M(mc=self, base_bet_amount=2.0, martingale_type=config.DEFAULT_MARTINGALE_TYPE)
+        self.strategy_15m = Strategy15M(mc=self, base_bet_amount=2.0, martingale_type=config.DEFAULT_MARTINGALE_TYPE)
         self.martingale_type = config.DEFAULT_MARTINGALE_TYPE
         
         # Virtual Balance for Dry Run
