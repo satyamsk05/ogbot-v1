@@ -16,11 +16,17 @@ class Dashboard:
         self.console = Console()
         self.figlet = Figlet(font="slant")
 
+    # ✅ FIX: Candle ka sahi color beat_price se nikalna
+    def get_true_color(self, candle, beat_price):
+        """Returns correct candle color based on close vs beat_price (Polymarket logic)."""
+        if beat_price and beat_price > 0:
+            return "GREEN" if candle.get('close', 0) > beat_price else "RED"
+        return candle.get('color', 'RED')  # fallback
+
     def make_header(self) -> Panel:
         """Create the ASCII Banner and Mode Header"""
         banner_text = self.figlet.renderText("OGBOT v1+")
         
-        # Color mode text based on status
         mode_color = "green" if self.mc.bot_mode == "AUTO" else "yellow"
         
         header_text = Text()
@@ -37,12 +43,10 @@ class Dashboard:
 
     def make_wallet_panel(self) -> Panel:
         """Create the Wallet & Exposure Stats Panel"""
-        # Determine colors indicating profit/loss
         pnl_color = "green" if self.mc.daily_pnl >= 0 else "red"
         price_arrow = "▲" if self.mc.live_price >= self.mc.prev_live_price else "▼"
         price_color = "green" if self.mc.live_price >= self.mc.prev_live_price else "red"
         
-        # Current exposure
         current_exposure = 0.0
         if self.mc.strategy_5m.active_bet_side:
             current_exposure += self.mc.strategy_5m.get_current_bet_amount()
@@ -90,13 +94,19 @@ class Dashboard:
 
     def make_market_panel(self, title: str, timeframe_data: dict, strategy, border_color: str) -> Panel:
         """Create a panel for a specific timeframe (5m or 15m)"""
-        # History string
+        
+        # ✅ FIX: beat_price pehle lo taaki color sahi calculate ho
+        beat_price = float(timeframe_data.get('beat_price', 0.0))
+        
+        # History string - ✅ FIX: get_true_color() use karo
         history = "[dim]Waiting for data...[/dim]"
         candles = timeframe_data.get('candles')
         if isinstance(candles, list) and len(candles) > 0:
-            history = " ".join(["🟢" if c.get('color') == 'GREEN' else "🔴" for c in candles[-10:]])  # type: ignore
+            history = " ".join([
+                "🟢" if self.get_true_color(c, beat_price) == 'GREEN' else "🔴"  # ✅ FIX
+                for c in candles[-10:]
+            ])
             
-        # Format target bet
         target_bet = strategy.next_planned_bet
         if "GREEN" in target_bet:
             bet_style = "bold green"
@@ -112,18 +122,16 @@ class Dashboard:
         table.add_column("Value")
         
         table.add_row("History:", history)
-        # Logic to calculate diff between live price and round price
-        round_price = float(timeframe_data.get('beat_price', 0.0))
+
+        round_price = beat_price
         price_diff = float(self.mc.live_price) - round_price
         
-        # Format the differential for display
         diff_str = ""
         if round_price > 0:
             diff_color = "green" if price_diff >= 0 else "red"
             diff_sign = "+" if price_diff >= 0 else ""
             diff_str = f" [{diff_color}]({diff_sign}${price_diff:,.2f})[/{diff_color}]"
             
-        # Time remaining logic
         now = int(time.time())
         interval_seconds = 900 if "15 MIN" in title else 300
         next_close_ts = ((now // interval_seconds) + 1) * interval_seconds
@@ -136,7 +144,6 @@ class Dashboard:
         table.add_row("Closes In:", countdown_str)
         table.add_row("Target Bet (Auto):", f"[{bet_style}]{target_bet}[/{bet_style}]")
         
-        # ACTIVE BET DETAILS
         if strategy.active_bet_side:
             side_color = "green" if strategy.active_bet_side == "UP" else "red"
             bet_info = f"[{side_color}]BET {strategy.active_bet_side}[/{side_color}] [yellow]${strategy.active_bet_amount:.2f}[/yellow]"
@@ -177,7 +184,6 @@ class Dashboard:
         """Construct the entire layout using up-to-date data"""
         layout = Layout()
         
-        # Divide into Main Header, Body, and Footer
         layout.split_column(
             Layout(name="header", size=10),
             Layout(name="wallet", size=8),
@@ -185,13 +191,11 @@ class Dashboard:
             Layout(name="footer", size=5)
         )
         
-        # Split body into left (5m) and right (15m)
         layout["body"].split_row(
             Layout(name="5m"),
             Layout(name="15m")
         )
         
-        # Assign panels
         layout["header"].update(self.make_header())
         layout["wallet"].update(self.make_wallet_panel())
         layout["5m"].update(self.make_market_panel("5 MIN MARKET", self.mc.data_5m, self.mc.strategy_5m, "yellow"))

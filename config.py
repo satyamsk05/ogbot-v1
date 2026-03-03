@@ -10,7 +10,7 @@ DEFAULT_MARTINGALE_TYPE = "TRIPLE"  # Only TRIPLE (3x) is supported
 # Limits and constraints
 MAX_SINGLE_BET = float(os.getenv("MAX_SINGLE_BET", "10.0"))
 MIN_WALLET_BALANCE = float(os.getenv("MIN_WALLET_BALANCE", "5.0"))
-MAX_PROGRESSION_STEPS = int(os.getenv("MAX_PROGRESSION_STEPS", "6")) # e.g., 6 steps of 3x: 1, 3, 9, 27, 81, 243
+MAX_PROGRESSION_STEPS = int(os.getenv("MAX_PROGRESSION_STEPS", "6"))
 
 # Telegram integration
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
@@ -26,6 +26,9 @@ HOST = "https://clob.polymarket.com"
 GAMMA_API = "https://gamma-api.polymarket.com"
 SYMBOL = "BTCUSDT"
 
-# Dry run flag for testing
-DRY_RUN = os.getenv("DRY_RUN", "False").lower() in ("true", "1", "yes", "t")
+# ✅ FIX: DRY_RUN aur VIRTUAL_START_BALANCE add kiya
+DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
 VIRTUAL_START_BALANCE = float(os.getenv("VIRTUAL_START_BALANCE", "500.0"))
+
+from zoneinfo import ZoneInfo
+ET_TZ = ZoneInfo("America/New_York")
