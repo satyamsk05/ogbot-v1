@@ -54,35 +54,33 @@ class Strategy15M:
         return candle.get('color', 'RED')  # fallback agar beat_price na ho
 
     def get_candle_sequence_display(self, candles, beat_price=0):
-        """Returns premium vertical candle display for Telegram with beat prices."""
+        """Returns premium horizontal candle trend display for Telegram."""
         if not candles:
             return "No data"
         last_n = candles[-9:] if len(candles) >= 9 else candles
+
+        # Mini Heatmap Trend Line
+        icons = []
+        for c in last_n:
+            true_color = self.get_true_color(c, beat_price)
+            if c.get("is_live"):
+                icons.append("🔵")
+            else:
+                icons.append("🟢" if true_color == "GREEN" else "🔴")
         
-        # Vertical candle list (newest first)
-        lines = []
-        for c in reversed(last_n):
-            true_color = self.get_true_color(c, beat_price)  # ✅ FIX
-            icon = "🟩" if true_color == "GREEN" else "🟥"
-            bp = c.get('beat_price', beat_price)
-            bp_str = f"`${bp:,.2f}`" if bp > 0 else ""
-            lines.append(f"    `{c['time']}` {icon} {bp_str}")
+        trend_line = " ".join(icons)
         
         # Streak detection
-        streak_color = self.get_true_color(last_n[-1], beat_price)  # ✅ FIX
+        streak_color = self.get_true_color(last_n[-1], beat_price)
         streak = 0
-        for c in reversed(last_n):
-            if self.get_true_color(c, beat_price) == streak_color:  # ✅ FIX
+        for x in reversed(last_n):
+            if self.get_true_color(x, beat_price) == streak_color:
                 streak += 1
             else:
                 break
         
-        streak_icon = "🔴" if streak_color == "RED" else "🟢"
-        streak_text = f"    {streak_icon} `{streak}x {streak_color}` streak"
-        if streak >= 3:
-            streak_text += " 🔥"
-        
-        return "\n".join(lines) + "\n" + streak_text
+        fire = "🔥" if streak >= 3 else ""
+        return f"{trend_line} {fire}\n    *⚡️ {streak}x {streak_color} streak*"
 
     def process(self, client, live_data, current_balance, bot_mode):
         """
@@ -148,12 +146,14 @@ class Strategy15M:
                 self.active_shares = 0.0
                 from telegram_bot import send_telegram_notification  # type: ignore
                 send_telegram_notification(
-                    f"🏆🏆 *WIN! (15m)* 🏆🏆\n\n"
-                    f"🎯 *Direction:* `{bet_direction}`\n"
-                    f"💰 *Payout:* `+${payout:.2f}`\n"
-                    f"📈 *Net PnL:* `+${net_pnl:.2f}`\n"
-                    f"💳 *Balance:* `${self.mc.current_balance:,.2f}`\n"
-                    f"✅ W: `{self.wins}` | ❌ L: `{self.losses}`"
+                    f"🏆 **WIN! (15m)**\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"🎯 **Side:** `{bet_direction}`\n"
+                    f"💰 **Payout:** `+${payout:.2f}`\n"
+                    f"📈 **PnL:** `+${net_pnl:.2f}`\n"
+                    f"──────────────────\n"
+                    f"💳 **Balance:** `${self.mc.current_balance:,.2f}`\n"
+                    f"✅ **W:** `{self.wins}` | ❌ **L:** `{self.losses}`"
                 )
             else:
                 self.losses += 1
@@ -171,11 +171,13 @@ class Strategy15M:
                 self.active_shares = 0.0
                 from telegram_bot import send_telegram_notification  # type: ignore
                 send_telegram_notification(
-                    f"🔴 *LOSS (15m)* 🔴\n\n"
-                    f"🎯 *Direction:* `{bet_direction}`\n"
-                    f"💸 *Lost:* `-${loss_amount:.2f}`\n"
-                    f"💳 *Balance:* `${self.mc.current_balance:,.2f}`\n"
-                    f"➡️ *Next:* `${next_stake:.2f}` (Step {self.martingale_step + 1})"
+                    f"🔴 **LOSS (15m)**\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"🎯 **Side:** `{bet_direction}`\n"
+                    f"💸 **Lost:** `-${loss_amount:.2f}`\n"
+                    f"──────────────────\n"
+                    f"💳 **Balance:** `${self.mc.current_balance:,.2f}`\n"
+                    f"➡️ **Next:** `${next_stake:.2f}` (Step {self.martingale_step + 1})"
                 )
 
         # ──── ACTIVE BET GUARD ────
@@ -185,8 +187,9 @@ class Strategy15M:
             return
 
         # ──── SIGNAL DETECTION (3-CANDLE PATTERN) ────
-        # ✅ FIX: c['color'] ki jagah get_true_color() use ho raha hai
-        last3 = [self.get_true_color(c, beat_p) for c in live_data['candles'][-3:]]
+        # ✅ FIX: slice badal diya taaki live candle exclude ho (always last 3 CLOSED candles)
+        closed_candles = live_data['candles'][:-1] if live_data['candles'][-1].get("is_live") else live_data['candles']
+        last3 = [self.get_true_color(c, beat_p) for c in closed_candles[-3:]]
         signal = ""
         if all(x == "RED" for x in last3):
             signal = "UP"    # 3 RED → bet GREEN (UP)
@@ -240,16 +243,17 @@ class Strategy15M:
                     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     seq_display = self.get_candle_sequence_display(live_data['candles'], beat_p)  # ✅ FIX
                     
-                    from telegram_bot import send_telegram_notification  # type: ignore
                     notif_msg = (
-                        f"🤖 *Auto Trade (15m)*\n\n"
-                        f"📊 *Pattern:* `{seq_display} → {signal}`\n"
-                        f"⏱ *Time:* `{now_str}`\n"
-                        f"💰 *Stake:* `${amount:.2f}`\n"
-                        f"🎯 *Side:* `{side_name}`\n"
-                        f"💵 *Avg Price:* `{price_str}`\n"
-                        f"📊 *Shares:* `{shares_str}`\n"
-                        f"🔢 *Martingale Step:* {self.martingale_step + 1}"
+                        f"💎 **OGBot Premium Signal (15m)**\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"📊 **Market Trend:**\n    {seq_display}\n\n"
+                        f"🚀 **Action:** `{signal}` (Reversal)\n"
+                        f"──────────────────\n"
+                        f"💰 **Stake:** `${amount:.2f}` (Step {self.martingale_step + 1})\n"
+                        f"🎯 **Target:** `{price_str}`\n"
+                        f"📈 **Shares:** `{shares_str}`\n"
+                        f"──────────────────\n"
+                        f"🕒 `{now_str}`"
                     )
                     send_telegram_notification(notif_msg)
                     

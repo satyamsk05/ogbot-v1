@@ -38,8 +38,7 @@ def transfer_usdc(to_address: str, amount_usd: float) -> tuple[bool, str]:
     if not config.PRIVATE_KEY:
         return False, "PRIVATE_KEY not found in config."
         
-    rpc_url = config.HOST.replace("clob.polymarket.com", "polygon-rpc.com") # Not exactly related, but let's use a public RPC
-    rpc_url = "https://polygon-bor-rpc.publicnode.com"
+    rpc_url = os.getenv("RPC_URL", "https://polygon-rpc.com")
     
     w3 = Web3(Web3.HTTPProvider(rpc_url))
     w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
@@ -71,7 +70,7 @@ def transfer_usdc(to_address: str, amount_usd: float) -> tuple[bool, str]:
                 best_contract_addr = checksum_addr
                 
         if max_balance < amount_usd:
-            return False, f"Insufficient balance in ANY known USDC contract. You have ${max_balance:.2f} max. (Check if funds are in a Proxy Wallet on Polymarket.com)"
+            return False, f"Insufficient balance. You have ${max_balance:.2f} max. (Check if funds are in a Proxy Wallet or Polymarket Clob)"
             
         usdc_contract = w3.eth.contract(address=best_contract_addr, abi=ERC20_ABI)
         

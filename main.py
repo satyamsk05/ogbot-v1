@@ -46,7 +46,7 @@ def fetch_market_data(mc, timeframe="5m", interval_seconds=300):
             if (rounded_end - now) > 60:
                 target_timestamp = rounded_end - interval_seconds
 
-            beat_price = target_data.get('beat_price', 0)  # pehle se jo hai wo rakho
+            beat_price = float(target_data.get('beat_price', 0.0))  # pehle se jo hai wo rakho
             up_token = None
             down_token = None
             market_name = ""
@@ -78,7 +78,7 @@ def fetch_market_data(mc, timeframe="5m", interval_seconds=300):
                     continue
 
             # beat_price update karo
-            if beat_price > 0:
+            if beat_price > 0.0:
                 target_data['beat_price'] = beat_price
             if up_token:
                 target_data['up_token'] = up_token
@@ -95,25 +95,40 @@ def fetch_market_data(mc, timeframe="5m", interval_seconds=300):
             # ── STEP 3: ✅ SIMPLE COLOR LOGIC: close > beat_price = GREEN, warna RED ──
             bp = target_data.get('beat_price', 0)
             candles = []
-            for c in data[:-1]:  # forming candle exclude
+            
+            # interval in seconds (5m=300, 15m=900)
+            interval_sec = 300 if timeframe == "5m" else 900
+            
+            for i, c in enumerate(data):
                 op = float(c[1])
                 cl = float(c[4])
-
+                start_ts = int(int(c[0]) // 1000)
+                expiry_ts = int(start_ts + int(interval_sec))
+                
+                is_live = (i == len(data) - 1)
+                
                 if bp > 0:
-                    # ✅ Yehi Polymarket ka exact logic hai
                     color = "GREEN" if cl > bp else "RED"
                 else:
-                    # beat_price nahi mila toh open/close fallback
                     color = "GREEN" if cl >= op else "RED"
 
-                candles.append({
+                candle_obj = {
                     "open": op,
                     "close": cl,
                     "color": color,
                     "beat_price": bp,
-                    "time": datetime.fromtimestamp(int(c[0])/1000, tz=config.ET_TZ).strftime("%I:%M %p"),
-                    "open_ts": int(c[0]) // 1000,
-                })
+                    "time": datetime.fromtimestamp(expiry_ts, tz=config.ET_TZ).strftime("%I:%M %p"),
+                    "start_ts": start_ts,
+                    "expiry_ts": expiry_ts,
+                    "is_live": is_live
+                }
+                
+                if is_live:
+                    now_ts = int(time.time())
+                    secs_left = max(0, expiry_ts - now_ts)
+                    candle_obj["seconds_until_close"] = secs_left
+                
+                candles.append(candle_obj)
 
             target_data['candles'] = candles
 

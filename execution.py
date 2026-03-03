@@ -1,9 +1,10 @@
 import time
 from py_clob_client.client import ClobClient
-from py_clob_client.clob_types import MarketOrderArgs, OrderType, ApiCreds, BalanceAllowanceParams, AssetType
-from py_clob_client.order_builder.constants import BUY
+from py_clob_client.clob_types import MarketOrderArgs, OrderArgs, OrderType, ApiCreds, BalanceAllowanceParams, AssetType
+from py_clob_client.order_builder.constants import BUY, SELL
 from py_clob_client.constants import POLYGON
 from web3 import Web3
+from datetime import datetime
 import json
 
 import config  # type: ignore
@@ -204,7 +205,6 @@ def place_market_order(client, token_id, amount, side_name):
             except Exception as e:
                 print(f"[Warn] Could not fetch exact execution price: {e}")
                 
-            from datetime import datetime
             now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 
             success_msg = f"\033[92mOrder Placed Successfully! (${amount} on {side_name} @ {price_str})\033[0m"
@@ -262,9 +262,6 @@ def place_limit_order(client, token_id, amount, price, side_name, is_buy=True):
         return False
 
     try:
-        from py_clob_client.clob_types import OrderArgs, OrderType
-        from py_clob_client.order_builder.constants import BUY, SELL
-        
         # In Polymarket, 'size' is the number of shares. For a BUY, amount / price = shares.
         shares = amount / price
         
@@ -282,7 +279,7 @@ def place_limit_order(client, token_id, amount, price, side_name, is_buy=True):
             token_id=token_id,
             price=price,
             size=shares,
-            side=action_const
+            side=BUY if is_buy else SELL
         )
         
         signed_order = client.create_order(args)

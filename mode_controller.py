@@ -34,7 +34,7 @@ class ModeController:
         self.strategy_15m = Strategy15M(mc=self, base_bet_amount=2.0, martingale_type=config.DEFAULT_MARTINGALE_TYPE)
         self.martingale_type = config.DEFAULT_MARTINGALE_TYPE
         
-        # Virtual Balance for Dry Run
+        # Balance Setup
         self.virtual_balance = config.VIRTUAL_START_BALANCE
         self.current_balance = self.virtual_balance if config.DRY_RUN else 0.0
         self.active_strategies = "BOTH"  # "5M", "15M", "BOTH"

@@ -20,7 +20,8 @@ _alert_chat_id = None
 def send_telegram_notification(message_text: str):
     if _bot_instance and _alert_chat_id:
         try:
-            _bot_instance.send_message(_alert_chat_id, f"📝 *Notification*\n{message_text}", parse_mode="Markdown")
+            # We remove the "Notification" prefix for a cleaner, premium look as headers are already bold
+            _bot_instance.send_message(_alert_chat_id, message_text, parse_mode="Markdown")
         except Exception as e:
             print(f"[Telegram] Failed to send notification: {e}")
 
@@ -44,15 +45,17 @@ def run_telegram_bot(mc):
             return "GREEN" if candle.get('close', 0) > beat_price else "RED"
         return candle.get('color', 'RED')
 
-    # ✅ FIX: get_streak ab beat_price use karta hai
+    # ✅ FIX: get_streak ab beat_price use karta hai aur live candle ignore karta hai
     def get_streak(candles_list, beat_p):
-        if not candles_list:
-            return "          "
-        last_n = candles_list[-9:] if len(candles_list) >= 9 else candles_list
-
         def true_color(c):
             return get_true_color(c, beat_p)
 
+        # ✅ FIX: Streak calculation should only use CLOSED candles
+        closed_n = [c for c in candles_list if not c.get("is_live")]
+        if not closed_n:
+            return "          "
+            
+        last_n = closed_n[-9:]
         streak_color = true_color(last_n[-1])
         streak = 0
         for c in reversed(last_n):
@@ -60,9 +63,10 @@ def run_telegram_bot(mc):
                 streak += 1
             else:
                 break
-        icon = "🔴" if streak_color == "RED" else "🟢"
+        
+        icon = "🟢" if streak_color == "GREEN" else "🔴"
         fire = " 🔥" if streak >= 3 else ""
-        return f"{icon}`{streak}x{streak_color[0]}`{fire}"
+        return f"{icon} *{streak}x {streak_color}*"
 
     def get_header():
         now = datetime.now(tz=config.ET_TZ).strftime("%I:%M %p")
@@ -105,10 +109,16 @@ def run_telegram_bot(mc):
                 c = c5[i]
                 # ✅ FIX: get_true_color use karo
                 true_col = get_true_color(c, beat_p_5m)
-                icon = "🟢" if true_col == "GREEN" else "🔴"
+                icon = "🔵" if c.get("is_live") else ("🟢" if true_col == "GREEN" else "🔴")
                 bp = c.get('beat_price', beat_p_5m)
                 bp_str = f"${bp/1000:.1f}k" if bp > 0 else "      "
-                left = f"`{c['time']}` {icon} `{bp_str}`"
+                
+                countdown = ""
+                if c.get("is_live"):
+                    s = c.get("seconds_until_close", 0)
+                    countdown = f"({int(s//60):02}:{int(s%60):02})"
+                
+                left = f"`{c['time']}` {icon} {countdown:<7}"
             else:
                 left = "                "
 
@@ -117,19 +127,25 @@ def run_telegram_bot(mc):
                 c = c15[i]
                 # ✅ FIX: get_true_color use karo
                 true_col = get_true_color(c, beat_p_15m)
-                icon = "🟢" if true_col == "GREEN" else "🔴"
+                icon = "🔵" if c.get("is_live") else ("🟢" if true_col == "GREEN" else "🔴")
                 bp = c.get('beat_price', beat_p_15m)
                 bp_str = f"${bp/1000:.1f}k" if bp > 0 else "      "
-                right = f"`{c['time']}` {icon} `{bp_str}`"
+                
+                countdown = ""
+                if c.get("is_live"):
+                    s = c.get("seconds_until_close", 0)
+                    countdown = f"({int(s//60):02}:{int(s%60):02})"
+                    
+                right = f"`{c['time']}` {icon} {countdown}"
             else:
                 right = ""
 
             chart_lines.append(f"{left} │ {right}")
 
-        # ✅ FIX: streak mein beat_price pass karo
+        # ✅ FIX: streak lines alignment
         s5_streak = get_streak(mc.data_5m.get('candles', []), beat_p_5m)
         s15_streak = get_streak(mc.data_15m.get('candles', []), beat_p_15m)
-        chart_lines.append(f"{s5_streak}             │ {s15_streak}")
+        chart_lines.append(f"{s5_streak:<26} │ {s15_streak}")
 
         chart_text = "\n".join(chart_lines)
 
@@ -195,6 +211,9 @@ def run_telegram_bot(mc):
             InlineKeyboardButton("📝 Trade History", callback_data="nav_trade_history"),
             InlineKeyboardButton("📊 Daily Report", callback_data="nav_daily_report")
         )
+        # Force Test button to its own row for better visibility
+        markup.row(InlineKeyboardButton("📢 Test All Alerts", callback_data="test_all_alerts"))
+        
         if config.DRY_RUN:
             markup.add(
                 InlineKeyboardButton("🔄 Reset Wallet", callback_data="reset_virtual"),
@@ -303,6 +322,58 @@ def run_telegram_bot(mc):
         except Exception as e:
             bot.answer_callback_query(call.id, "Error in navigation")
             print(f"Nav error: {e}")
+
+    @bot.callback_query_handler(func=lambda call: call.data == "test_all_alerts")
+    def test_alerts_handler(call):
+        if not is_allowed(call.message): return
+        bot.answer_callback_query(call.id, "🚀 Sending 3 Premium Demo Alerts...")
+        
+        from datetime import datetime
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # 1. Mock Premium Signal
+        trade_msg = (
+            f"💎 **OGBot Premium Signal (Demo)**\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📊 **Market Trend:**\n    🟢 🟢 🟢 🟢 🔥\n    *⚡️ 4x GREEN streak*\n\n"
+            f"🚀 **Action:** `DOWN` (Reversal)\n"
+            f"──────────────────\n"
+            f"💰 **Stake:** `$10.00` (Step 1)\n"
+            f"🎯 **Target:** `0.5000`\n"
+            f"📈 **Shares:** `20.00`\n"
+            f"──────────────────\n"
+            f"🕒 `{now_str}`"
+        )
+        send_telegram_notification(trade_msg)
+        
+        time.sleep(1)
+        
+        # 2. Mock Win
+        win_msg = (
+            f"🏆 **WIN! (Demo)**\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🎯 **Side:** `DOWN`\n"
+            f"💰 **Payout:** `+$20.00`\n"
+            f"📈 **PnL:** `+$10.00`\n"
+            f"──────────────────\n"
+            f"💳 **Balance:** `$510.00`\n"
+            f"✅ **W:** 5 | ❌ **L:** 2"
+        )
+        send_telegram_notification(win_msg)
+        
+        time.sleep(1)
+        
+        # 3. Mock Loss
+        loss_msg = (
+            f"🔴 **LOSS (Demo)**\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🎯 **Side:** `UP`\n"
+            f"💸 **Lost:** `-$10.00`\n"
+            f"──────────────────\n"
+            f"💳 **Balance:** `$500.00`\n"
+            f"➡️ **Next:** `$30.00` (Step 2)"
+        )
+        send_telegram_notification(loss_msg)
 
     @bot.callback_query_handler(func=lambda call: call.data == "reset_virtual")
     def reset_virtual_handler(call):

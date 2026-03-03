@@ -33,10 +33,11 @@
 | Thread | Function | Interval | What it Does |
 |--------|----------|----------|-------------|
 | Thread 1 | `fetch_live_price()` | 0.1s | Binance BTC live price |
-| Thread 2 | `fetch_market_data("5m")` | 15s | 5m candles + Polymarket tokens |
-| Thread 3 | `fetch_market_data("15m")` | 15s | 15m candles + Polymarket tokens |
+| Thread 2 | `fetch_market_data("5m")` | 5s | 5m candles + Polymarket tokens |
+| Thread 3 | `fetch_market_data("15m")` | 5s | 15m candles + Polymarket tokens |
 | Thread 4 | `input_thread_func()` | Blocking | Terminal CLI commands |
 | Thread 5 | `run_telegram_bot()` | Polling | Telegram UI & callbacks |
+| Thread 6 | `daily_summary_scheduler()`| 30s | Checks for 23:59 summary |
 | **Main** | `process_cycle()` | 5s | Strategy processing + Auto redeem |
 
 ---
@@ -108,8 +109,11 @@ Binance API ──(candles)──► main.py ──► ModeController.data_5m/da
 ├── ⚙️ More Settings
 │   ├── 💰 Set Base Bet
 │   ├── 🕒 Market Mode (5m/15m/Both)
-│   └── 📊 Detailed Status
-└── 🔄 Refresh Dashboard
+│   ├── 📊 Detailed Status
+│   ├── 📝 Trade History
+│   ├── 📊 Daily Report
+│   └── � Test All Alerts
+└── �🔄 Refresh Dashboard
 ```
 
 ---
@@ -119,9 +123,22 @@ Binance API ──(candles)──► main.py ──► ModeController.data_5m/da
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `PRIVATE_KEY` | ✅ | Polygon wallet private key |
-| `POLY_FUNDER` | ❌ | Polymarket funder address |
 | `TELEGRAM_BOT_TOKEN` | ✅ | Telegram bot API token |
 | `ALLOWED_CHAT_ID` | ✅ | Authorized Telegram chat ID |
-| `RPC_URL` | ❌ | Custom Polygon RPC (default: polygon-rpc.com) |
 | `BOT_MODE` | ❌ | Startup mode: `MANUAL` or `AUTO` |
-| `DRY_RUN` | ❌ | `True` for simulation mode |
+| `DRY_RUN` | ❌ | `True` for simulation mode (default) |
+| `VIRTUAL_START_BALANCE` | ❌ | Starting virtual wallet (default: 500) |
+| `MAX_SINGLE_BET` | ❌ | Maximum allowed stake (default: 10) |
+| `MAX_PROGRESSION_STEPS`| ❌ | Max martingale steps (default: 6) |
+
+---
+
+## 9. Premium Notification System
+
+OGBot uses a premium visual design for Telegram alerts to ensure clarity and professional aesthetics.
+
+### Key Components:
+- **Visual Trends:** Uses circular indicators (🟢/🔴) for candle history.
+- **Dynamic Headers:** Bold headers with icons (💎 OGBot Premium) for instant recognition.
+- **Organized Data:** Clear separation of Action, Stake, Target, and Shares using symbols.
+- **Martingale Tracking:** Explicit step tracking (Step 1, Step 2, etc.) in every alert.
