@@ -30,5 +30,9 @@ SYMBOL = "BTCUSDT"
 DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
 VIRTUAL_START_BALANCE = float(os.getenv("VIRTUAL_START_BALANCE", "500.0"))
 
+# Server/Deployment Options
+HEADLESS = os.getenv("HEADLESS", "false").lower() == "true"
+LOG_FILE = "bot.log"
+
 from zoneinfo import ZoneInfo
 ET_TZ = ZoneInfo("America/New_York")

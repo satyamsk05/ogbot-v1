@@ -66,6 +66,15 @@ DRY_RUN=true
 VIRTUAL_START_BALANCE=500
 ```
 
+### 5. Server Deployment (Optional)
+To run the bot 24/7 on a server in the background:
+1. Set `HEADLESS=true` in your `.env` file.
+2. The bot will hide the terminal UI and log all activities to `bot.log`.
+3. Use `nohup` or `screen/tmux` to keep it running:
+   ```bash
+   nohup python3 main.py &
+   ```
+
 ---
 
 ## 🕹️ Usage
@@ -74,6 +83,9 @@ VIRTUAL_START_BALANCE=500
 ```bash
 python3 main.py
 ```
+
+### Logging
+All bot activities, trades, and errors are saved in `bot.log` for easy monitoring on a server.
 
 ### Telegram Commands
 | Command | Action |

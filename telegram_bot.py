@@ -1,5 +1,5 @@
 import telebot  # type: ignore
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton  # type: ignore
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton  # type: ignore
 import config  # type: ignore
 import threading
 import time
@@ -158,23 +158,47 @@ def run_telegram_bot(mc):
 
     def main_menu_markup():
         markup = InlineKeyboardMarkup(row_width=2)
+        
+        # Row 1: STATUS | WALLET
+        markup.add(
+            InlineKeyboardButton("🛢 SATUS", callback_data="nav_status"),
+            InlineKeyboardButton("💳 WALLET", callback_data="nav_transfer")
+        )
+        
+        # Row 2: START BOT | STOP BOT
+        # Based on current mode highlight or logic
         if mc.bot_mode == "MANUAL":
-            markup.row(InlineKeyboardButton("▶️ START BOT", callback_data="set_mode_AUTO"))
+            markup.add(
+                InlineKeyboardButton("🟢 START BOT", callback_data="set_mode_AUTO"),
+                InlineKeyboardButton("🔴 STOP BOT (Active)", callback_data="nav_home")
+            )
         else:
-            markup.row(InlineKeyboardButton("⏸ STOP BOT", callback_data="set_mode_MANUAL"))
-        markup.row(
-            InlineKeyboardButton("💰 Cashout Now", callback_data="manual_cashout"),
-            InlineKeyboardButton(f"🤖 Auto Cash: {'ON' if mc.auto_redeem_enabled else 'OFF'}", callback_data="toggle_auto_cashout")
+            markup.add(
+                InlineKeyboardButton("🟢 START BOT (Active)", callback_data="nav_home"),
+                InlineKeyboardButton("🔴 STOP BOT", callback_data="set_mode_MANUAL")
+            )
+            
+        # Row 3: MARTINGALE RESET | HISTORY
+        markup.add(
+            InlineKeyboardButton("⚡ MARTINGALE RESET", callback_data="reset_martingale"),
+            InlineKeyboardButton("📊 HISTORY", callback_data="nav_trade_history")
         )
+        
+        # Row 4: Navigation / Refresh
         markup.row(
-            InlineKeyboardButton("📈 Trade 5m", callback_data="nav_trade_5m"),
-            InlineKeyboardButton("📉 Trade 15m", callback_data="nav_trade_15m")
-        )
-        markup.row(
-            InlineKeyboardButton("💸 Withdraw", callback_data="nav_transfer"),
+            InlineKeyboardButton("📈 5m", callback_data="nav_trade_5m"),
+            InlineKeyboardButton("📉 15m", callback_data="nav_trade_15m"),
             InlineKeyboardButton("⚙️ Settings", callback_data="nav_settings")
         )
-        markup.row(InlineKeyboardButton("🔄 Refresh", callback_data="nav_home"))
+        markup.row(InlineKeyboardButton("🔄 Refresh Dashboard", callback_data="nav_home"))
+        
+        return markup
+
+    def main_reply_markup():
+        markup = ReplyKeyboardMarkup(resize_keyboard=True)
+        markup.row(KeyboardButton("🛢 STATUS"), KeyboardButton("💎 WALLET"))
+        markup.row(KeyboardButton("🟢 START BOT"), KeyboardButton("🔴 STOP BOT"))
+        markup.row(KeyboardButton("⚡ MARTINGALE RESET"), KeyboardButton("📊 HISTORY"))
         return markup
 
     def trade_menu_markup(timeframe):
@@ -229,7 +253,33 @@ def run_telegram_bot(mc):
     def send_welcome(message):
         if not is_allowed(message): return
         bot.send_message(message.chat.id, get_header() + "\n🎯 *Main Menu:*",
+                         reply_markup=main_reply_markup(), parse_mode="Markdown")
+        # Also send the inline keyboard as a second message if you want both
+        bot.send_message(message.chat.id, "🎯 *Interactive Interface:*", 
                          reply_markup=main_menu_markup(), parse_mode="Markdown")
+
+    @bot.message_handler(func=lambda message: True)
+    def handle_text_buttons(message):
+        if not is_allowed(message): return
+        text = message.text
+        if "STATUS" in text:
+            # Re-use nav_handler logic for 'status'
+            nav_handler(NavCall("nav_status", message, "0"))
+        elif "WALLET" in text:
+            nav_handler(NavCall("nav_transfer", message, "0"))
+        elif "START BOT" in text:
+            bot.send_message(message.chat.id, "🔄 Switching to AUTO mode...")
+            set_mode_handler(NavCall("set_mode_AUTO", message, "0"))
+        elif "STOP BOT" in text:
+            bot.send_message(message.chat.id, "⏸ Switching to MANUAL mode...")
+            set_mode_handler(NavCall("set_mode_MANUAL", message, "0"))
+        elif "MARTINGALE RESET" in text:
+            reset_martingale_handler(NavCall("reset_martingale", message, "0"))
+        elif "HISTORY" in text:
+            nav_handler(NavCall("nav_trade_history", message, "0"))
+        else:
+            # Fallback for other text
+            send_welcome(message)
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith('nav_'))
     def nav_handler(call):
@@ -412,6 +462,16 @@ def run_telegram_bot(mc):
             bot.send_message(message.chat.id, f"✅ Slippage set to {val*100:.1f}%")
         except:
             bot.send_message(message.chat.id, "❌ Invalid input.")
+
+    @bot.callback_query_handler(func=lambda call: call.data == 'reset_martingale')
+    def reset_martingale_handler(call):
+        if not is_allowed(call.message): return
+        mc.strategy_5m.martingale_step = 0
+        mc.strategy_15m.martingale_step = 0
+        bot.answer_callback_query(call.id, "⚡ Martingale Progression Reset Successfully!")
+        bot.edit_message_text(get_header() + "\n🎯 *Main Menu (Martingale Reset Done!)*",
+                             chat_id=call.message.chat.id, message_id=call.message.message_id,
+                             reply_markup=main_menu_markup(), parse_mode="Markdown")
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith('set_mode_'))
     def set_mode_handler(call):

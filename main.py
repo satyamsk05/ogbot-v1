@@ -11,6 +11,18 @@ import config  # type: ignore
 from mode_controller import ModeController  # type: ignore
 from manual_interface import input_thread_func  # type: ignore
 from telegram_bot import run_telegram_bot  # type: ignore
+import logging
+
+# Setup Logging for Server Deployment
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[
+        logging.FileHandler(config.LOG_FILE),
+        logging.StreamHandler() if not config.HEADLESS else logging.NullHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 
 def fetch_live_price(mc):
@@ -140,26 +152,39 @@ def main():
 
     last_process_time = 0.0
 
+    logger.info(f"Starting bot in {'HEADLESS' if config.HEADLESS else 'UI'} mode...")
+
     try:
-        with Live(mc.get_dashboard_layout(), refresh_per_second=5, screen=True) as live:
+        if config.HEADLESS:
+            # Simple Headless Loop
             while mc.running:
                 current_time = time.time()
-
                 if current_time - last_process_time >= 5:
                     mc.process_cycle()
                     last_process_time = current_time
-
-                live.update(mc.get_dashboard_layout())
-                time.sleep(0.2)
+                    # Minimal log to show life
+                    if int(current_time) % 60 < 5: 
+                        logger.info(f"Heartbeat: Bal=${mc.current_balance:.2f} | PnL=${mc.daily_pnl:.2f}")
+                time.sleep(1)
+        else:
+            # Interactive UI Loop
+            with Live(mc.get_dashboard_layout(), refresh_per_second=5, screen=True) as live:
+                while mc.running:
+                    current_time = time.time()
+                    if current_time - last_process_time >= 5:
+                        mc.process_cycle()
+                        last_process_time = current_time
+                    live.update(mc.get_dashboard_layout())
+                    time.sleep(0.2)
 
     except KeyboardInterrupt:
         mc.running = False
-        print("\nBot shutting down safely...")
+        logger.info("Bot shutting down safely (KeyboardInterrupt).")
     except Exception as e:
         import traceback
-        traceback.print_exc()
+        logger.error(f"CRITICAL ERROR: {e}")
+        logger.error(traceback.format_exc())
         mc.running = False
-        print(f"\n[CRITICAL ERROR] UI Loop Crashed: {e}")
 
 
 if __name__ == "__main__":

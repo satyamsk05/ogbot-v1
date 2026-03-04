@@ -39,12 +39,11 @@ class Strategy5M:
         self.is_warmed_up = False
         
     def get_current_bet_amount(self):
-        if self.martingale_type == "TRIPLE":
-            # Triple progression: 1, 3, 9, 27, 81...
-            return self.base_bet_amount * (3 ** self.martingale_step)
-        else:
-            # Linear progression: 1, 2, 3, 4, ...
-            return self.base_bet_amount * (self.martingale_step + 1)
+        # New progression sequence: [2, 5, 10, 22, 45, 95]
+        # Any step beyond index 5 will cap at 95 or loop depending on strategy
+        progression = [2.0, 5.0, 10.0, 22.0, 45.0, 95.0]
+        idx = min(self.martingale_step, len(progression) - 1)
+        return progression[idx]
 
     # ✅ FIX: Prioritize pre-calculated color from main.py
     def get_true_color(self, candle, beat_price):
