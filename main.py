@@ -30,110 +30,79 @@ def fetch_live_price(mc):
 
 def fetch_market_data(mc, timeframe="5m", interval_seconds=300):
     """
-    ✅ SIMPLE LOGIC:
-    - Polymarket se beat_price (price to beat) fetch karo
-    - Har candle ka color = close > beat_price ? GREEN : RED
-    - Koi complicated cache/overlay nahi
+    Background thread to fetch Binance BTC candle data for chart display.
     """
+    import urllib.parse
     while mc.running:
         try:
             target_data = mc.data_5m if timeframe == "5m" else mc.data_15m
-
-            # ── STEP 1: Polymarket se current market aur beat_price fetch karo ──
             now = int(time.time())
+            
             rounded_end = ((now // interval_seconds) + 1) * interval_seconds
-            target_timestamp = rounded_end
-            if (rounded_end - now) > 60:
-                target_timestamp = rounded_end - interval_seconds
+            expiry_str = datetime.fromtimestamp(rounded_end, tz=config.ET_TZ).strftime("%I:%M %p")
+            target_data['expiry'] = expiry_str
 
-            beat_price = float(target_data.get('beat_price', 0.0))  # pehle se jo hai wo rakho
-            up_token = None
-            down_token = None
-            market_name = ""
-            current_slug = ""
-
-            for ts in [target_timestamp, target_timestamp + interval_seconds]:
-                slug = f"btc-updown-{timeframe}-{ts}"
-                try:
-                    gr = requests.get(f"{config.GAMMA_API}/events?slug={slug}", timeout=5)
-                    gdata = gr.json()
-                    if gdata and len(gdata) > 0 and 'markets' in gdata[0]:
-                        m = gdata[0]['markets'][0]
-                        if not m.get('closed', True):
-                            tokens = json.loads(m.get('clobTokenIds', '[]'))
-                            if len(tokens) >= 2:
-                                up_token = tokens[0]
-                                down_token = tokens[1]
-                                market_name = m.get('question', '')
-                                current_slug = slug
-                                expiry_str = datetime.fromtimestamp(ts, tz=config.ET_TZ).strftime("%I:%M %p")
-                                target_data['expiry'] = expiry_str
-
-                                # ✅ beat_price market question se nikalo: "Will BTC be above $68,207.82"
-                                match = re.search(r'\$([0-9,.]+)', market_name)
-                                if match:
-                                    beat_price = float(match.group(1).replace(',', ''))
-                                break
-                except:
-                    continue
-
-            # beat_price update karo
-            if beat_price > 0.0:
-                target_data['beat_price'] = beat_price
-            if up_token:
-                target_data['up_token'] = up_token
-                target_data['down_token'] = down_token
-                target_data['market_name'] = market_name
-                target_data['current_slug'] = current_slug
-
-            # ── STEP 2: Binance se candles fetch karo (price data ke liye) ──
-            params = {"symbol": config.SYMBOL, "interval": timeframe, "limit": 10}
-            r = requests.get("https://api.binance.com/api/v3/klines", params=params, timeout=10)
-            r.raise_for_status()
-            data = r.json()
-
-            # ── STEP 3: ✅ SIMPLE COLOR LOGIC: close > beat_price = GREEN, warna RED ──
-            bp = target_data.get('beat_price', 0)
-            candles = []
+            slug = f"btc-updown-{timeframe}-{rounded_end}"
             
-            # interval in seconds (5m=300, 15m=900)
-            interval_sec = 300 if timeframe == "5m" else 900
-            
-            for i, c in enumerate(data):
-                op = float(c[1])
-                cl = float(c[4])
-                start_ts = int(int(c[0]) // 1000)
-                expiry_ts = int(start_ts + int(interval_sec))
-                
-                is_live = (i == len(data) - 1)
-                
-                if bp > 0:
-                    color = "GREEN" if cl > bp else "RED"
-                else:
-                    color = "GREEN" if cl >= op else "RED"
+            # 1. Fetch live market token and beat price from Polymarket
+            try:
+                gr = requests.get(f"{config.GAMMA_API}/events?slug={slug}", timeout=5)
+                gdata = gr.json()
+                if gdata and len(gdata) > 0 and 'markets' in gdata[0]:
+                    m = gdata[0]['markets'][0]
+                    target_data['market_name'] = m.get('question', '')
+                    target_data['current_slug'] = slug
+                    
+                    tokens = json.loads(m.get('clobTokenIds', '[]'))
+                    if len(tokens) >= 2:
+                        target_data['up_token'] = tokens[0]
+                        target_data['down_token'] = tokens[1]
+            except Exception:
+                pass
 
-                candle_obj = {
-                    "open": op,
-                    "close": cl,
-                    "color": color,
-                    "beat_price": bp,
-                    "time": datetime.fromtimestamp(expiry_ts, tz=config.ET_TZ).strftime("%I:%M %p"),
-                    "start_ts": start_ts,
-                    "expiry_ts": expiry_ts,
-                    "is_live": is_live
-                }
+            # 2. Fetch standard Binance BTC OHLC charts
+            try:
+                binance_tf = "5m" if timeframe == "5m" else "15m"
+                br = requests.get(
+                    "https://api.binance.com/api/v3/klines", 
+                    params={"symbol": config.SYMBOL, "interval": binance_tf, "limit": 10},
+                    timeout=5
+                )
+                klines = br.json()
                 
-                if is_live:
-                    now_ts = int(time.time())
-                    secs_left = max(0, expiry_ts - now_ts)
-                    candle_obj["seconds_until_close"] = secs_left
-                
-                candles.append(candle_obj)
-
-            target_data['candles'] = candles
+                candles = []
+                for i, k in enumerate(klines):
+                    is_live = (i == len(klines) - 1)
+                    op = float(k[1])
+                    cl = float(k[4])
+                    c_start = int(k[0]) // 1000
+                    c_end = int(k[6]) // 1000
+                    
+                    c_obj = {
+                        "time": datetime.fromtimestamp(c_start, tz=config.ET_TZ).strftime("%I:%M %p"),
+                        "start_ts": c_start,
+                        "expiry_ts": c_end,
+                        "is_live": is_live,
+                        "open": op,
+                        "close": cl,
+                        "color": "GREEN" if cl >= op else "RED"
+                    }
+                    
+                    if is_live:
+                        c_obj["seconds_until_close"] = max(0, rounded_end - now)
+                        c_obj["beat_price"] = op
+                        target_data['beat_price'] = op
+                        
+                    candles.append(c_obj)
+                    
+                target_data['candles'] = candles
+            except Exception:
+                pass
 
         except Exception as e:
             pass
+
+        time.sleep(5)
 
         time.sleep(5)
 

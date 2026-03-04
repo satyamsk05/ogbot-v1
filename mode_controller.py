@@ -55,6 +55,7 @@ class ModeController:
         
         self.last_redeem_time = 0
         self.auto_redeem_enabled = True
+        self.strike_cache = {} # timestamp -> strike_price
         self.running = True
 
     def initialize(self):
@@ -254,9 +255,10 @@ class ModeController:
 
     def process_cycle(self):
         """Called periodically by the main thread."""
-        if self.client:
+        # Allow processing in DRY_RUN even if client initialization failed (e.g. missing PRIVATE_KEY)
+        if self.client or config.DRY_RUN:
             # 1. Update Balance & Strategy Processing
-            if not config.DRY_RUN:
+            if not config.DRY_RUN and self.client:
                 self.update_balance(check_balance(self.client))
             
             if self.strategy_5m.enabled:
@@ -265,7 +267,7 @@ class ModeController:
                 self.strategy_15m.process(self.client, self.data_15m, self.current_balance, self.bot_mode)
             
             # 2. Periodic Auto-Redemption (Every 3 minutes)
-            if self.auto_redeem_enabled:
+            if self.auto_redeem_enabled and self.client:
                 now = time.time()
                 if now - self.last_redeem_time > 180:
                     print(f"{CYAN}[System] Triggering periodic auto-redemption...{RESET}")

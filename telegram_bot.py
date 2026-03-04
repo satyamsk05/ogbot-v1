@@ -39,27 +39,26 @@ def run_telegram_bot(mc):
     def is_allowed(message):
         return str(message.chat.id) == allowed_chat_id if allowed_chat_id else True
 
-    # ✅ FIX: beat_price se sahi color nikalna
+    # ✅ FIX: Use pre-calculated color from main.py
     def get_true_color(candle, beat_price):
+        if 'color' in candle:
+            return candle['color']
         if beat_price and beat_price > 0:
             return "GREEN" if candle.get('close', 0) > beat_price else "RED"
-        return candle.get('color', 'RED')
+        return "RED"
 
-    # ✅ FIX: get_streak ab beat_price use karta hai aur live candle ignore karta hai
-    def get_streak(candles_list, beat_p):
-        def true_color(c):
-            return get_true_color(c, beat_p)
-
-        # ✅ FIX: Streak calculation should only use CLOSED candles
+    # ✅ FIX: get_streak ab pre-calculated colors use karta hai
+    def get_streak(candles_list):
+        # Streak calculation should only use CLOSED candles
         closed_n = [c for c in candles_list if not c.get("is_live")]
         if not closed_n:
             return "          "
             
         last_n = closed_n[-9:]
-        streak_color = true_color(last_n[-1])
+        streak_color = last_n[-1].get('color', 'RED')
         streak = 0
         for c in reversed(last_n):
-            if true_color(c) == streak_color:
+            if c.get('color') == streak_color:
                 streak += 1
             else:
                 break
@@ -92,10 +91,6 @@ def run_telegram_bot(mc):
         step_5m = s5.martingale_step + 1
         step_15m = s15.martingale_step + 1
 
-        # ✅ FIX: beat_price pehle fetch karo
-        beat_p_5m = mc.data_5m.get('beat_price', 0)
-        beat_p_15m = mc.data_15m.get('beat_price', 0)
-
         c5 = list(reversed(mc.data_5m.get('candles', [])[-9:]))
         c15 = list(reversed(mc.data_15m.get('candles', [])[-9:]))
 
@@ -107,45 +102,43 @@ def run_telegram_bot(mc):
             # Left side (5m)
             if i < len(c5):
                 c = c5[i]
-                # ✅ FIX: get_true_color use karo
-                true_col = get_true_color(c, beat_p_5m)
+                true_col = c.get('color', 'RED')
                 icon = "🔵" if c.get("is_live") else ("🟢" if true_col == "GREEN" else "🔴")
-                bp = c.get('beat_price', beat_p_5m)
-                bp_str = f"${bp/1000:.1f}k" if bp > 0 else "      "
+                bp = c.get('beat_price', 0)
+                bp_str = f"|{bp/1000:0.1f}k" if bp > 0 else "      "
                 
                 countdown = ""
                 if c.get("is_live"):
                     s = c.get("seconds_until_close", 0)
                     countdown = f"({int(s//60):02}:{int(s%60):02})"
                 
-                left = f"`{c['time']}` {icon} {countdown:<7}"
+                left = f"`{c['time']}` {icon}{bp_str:>6} {countdown}"
             else:
-                left = "                "
+                left = "                      "
 
             # Right side (15m)
             if i < len(c15):
                 c = c15[i]
-                # ✅ FIX: get_true_color use karo
-                true_col = get_true_color(c, beat_p_15m)
+                true_col = c.get('color', 'RED')
                 icon = "🔵" if c.get("is_live") else ("🟢" if true_col == "GREEN" else "🔴")
-                bp = c.get('beat_price', beat_p_15m)
-                bp_str = f"${bp/1000:.1f}k" if bp > 0 else "      "
+                bp = c.get('beat_price', 0)
+                bp_str = f"|{bp/1000:0.1f}k" if bp > 0 else "      "
                 
                 countdown = ""
                 if c.get("is_live"):
                     s = c.get("seconds_until_close", 0)
                     countdown = f"({int(s//60):02}:{int(s%60):02})"
                     
-                right = f"`{c['time']}` {icon} {countdown}"
+                right = f"`{c['time']}` {icon}{bp_str:>6} {countdown}"
             else:
                 right = ""
 
-            chart_lines.append(f"{left} │ {right}")
+            chart_lines.append(f"{left.ljust(32)} │ {right}")
 
         # ✅ FIX: streak lines alignment
-        s5_streak = get_streak(mc.data_5m.get('candles', []), beat_p_5m)
-        s15_streak = get_streak(mc.data_15m.get('candles', []), beat_p_15m)
-        chart_lines.append(f"{s5_streak:<26} │ {s15_streak}")
+        s5_streak = get_streak(mc.data_5m.get('candles', []))
+        s15_streak = get_streak(mc.data_15m.get('candles', []))
+        chart_lines.append(f"{s5_streak.ljust(33)} │ {s15_streak}")
 
         chart_text = "\n".join(chart_lines)
 

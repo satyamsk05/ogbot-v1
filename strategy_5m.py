@@ -46,12 +46,14 @@ class Strategy5M:
             # Linear progression: 1, 2, 3, 4, ...
             return self.base_bet_amount * (self.martingale_step + 1)
 
-    # ✅ FIX: Color ab beat_price se compare hoga, na ki open/close se
+    # ✅ FIX: Prioritize pre-calculated color from main.py
     def get_true_color(self, candle, beat_price):
-        """Returns correct candle color based on close vs beat_price (Polymarket logic)."""
+        """Returns correct candle color. Prioritizes pre-calculated color."""
+        if 'color' in candle:
+            return candle['color']
         if beat_price > 0:
             return "GREEN" if candle['close'] > beat_price else "RED"
-        return candle.get('color', 'RED')  # fallback agar beat_price na ho
+        return "RED"
 
     def get_candle_sequence_display(self, candles, beat_price=0):
         """Returns premium horizontal candle trend display for Telegram."""

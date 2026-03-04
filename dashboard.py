@@ -16,12 +16,13 @@ class Dashboard:
         self.console = Console()
         self.figlet = Figlet(font="slant")
 
-    # ✅ FIX: Candle ka sahi color beat_price se nikalna
     def get_true_color(self, candle, beat_price):
-        """Returns correct candle color based on close vs beat_price (Polymarket logic)."""
+        """Returns correct candle color based on precalculated color."""
+        if 'color' in candle:
+            return candle['color']
         if beat_price and beat_price > 0:
             return "GREEN" if candle.get('close', 0) > beat_price else "RED"
-        return candle.get('color', 'RED')  # fallback
+        return "RED"
 
     def make_header(self) -> Panel:
         """Create the ASCII Banner and Mode Header"""
