@@ -1,124 +1,119 @@
-# 🤖 OGBot v1+ — Polymarket BTC Trading Bot
+# 🤖 OGBot v1+ | Polymarket BTC Trading Bot
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Platform: Polygon](https://img.shields.io/badge/network-Polygon-purple.svg)](https://polygon.technology/)
 
-OGBot is a sophisticated, dual-mode trading bot designed for Polymarket's BTC Up/Down markets. It combines real-time data from Binance with Polymarket's CLOB API to execute automated and manual trades based on a proven Martingale reversal strategy.
+> **A high-performance, dual-mode trading bot for Polymarket's BTC Up/Down markets.**
+
+---
+
+## 💎 Overview
+OGBot v1+ is a professional-grade trading engine designed to exploit short-term volatility in Polymarket's Bitcoin binary options. It features a robust multi-threaded architecture, real-time market synchronization, and a premium visual experience for both desktop and mobile users.
 
 ---
 
 ## 🚀 Key Features
 
-- **Dual-Mode Operation:** Toggle between `MANUAL` and `AUTO` trading modes.
-- **Automated Reversal Strategy:** Monitors 5-minute and 15-minute BTC trends. Executes trades on 3-candle reversal patterns.
-- **Martingale Betting Systems:** Supports **Linear** (Safe) and **Triple** (High Profit) progression systems.
-- **Real-Time Dashboards:**
-  - **Terminal UI:** Premium Rich-based dashboard for desktop monitoring.
-  - **Telegram Bot:** Fully interactive Telegram menu for remote control and instant notifications.
-- **Dry Run Mode:** Risk-free simulation mode with virtual balance for strategy testing.
-- **Auto-Redeem:** Periodically cashes out winning positions automatically.
-- **Daily Reports:** Automatically sends a PnL summary at 23:59 daily.
+### 🧠 Intelligent Trading
+- **Automated Reversal Strategy:** Monitors 5m & 15m timeframes. Triggers on 3-candle reversal patterns.
+- **Custom Martingale Progression:** [2, 5, 10, 22, 45, 95] sequence for optimized recovery.
+- **Auto-Redeem:** Systematic profit-taking for closed winning positions.
+
+### 📱 Premium Interfaces
+- **Interactive Telegram UI:** Full mobile control via Persistent Menus and Inline Grid layouts.
+- **Rich Desktop Dashboard:** Detailed terminal HUD for real-time monitoring.
+- **Real-Time Price Sync:** 0.1s Binance price tracking for maximum precision.
+
+### 🛡️ Reliability & Security
+- **Server Readiness:** Headless mode & file-based logging for 24/7 VPS deployment.
+- **Dry-Run Mode:** Test strategies with a virtual balance without risking real USDC.
+- **Access Control:** Restricted Telegram chat IDs to ensure only you control the bot.
 
 ---
 
-## 🏗️ Architecture Overview
+## 🏗 Architecture
+The system is built for resilience and speed, utilizing a modular design and multi-threaded execution.
 
-OGBot is built on a multi-threaded architecture to ensure real-time responsiveness:
+### System Components
+| Layer | Description |
+| :--- | :--- |
+| **Brain** | `ModeController` orchestrates logic, data, and strategy states. |
+| **Execution** | `execution.py` handles orders and redemption via CLOB API. |
+| **Strategy** | `strategy_5m.py` / `strategy_15m.py` manage specific timeframe patterns. |
+| **UI/UX** | `telegram_bot.py` and `dashboard.py` provide visual feedback. |
 
-- **Thread 1:** Binance BTC live price tracker (0.1s interval).
-- **Thread 2/3:** Polymarket market data & candle loaders (5s interval).
-- **Thread 4:** Interactive Terminal CLI.
-- **Thread 5:** Telegram Bot polling and UI manager.
-- **Thread 6:** Daily summary scheduler.
-- **Main Thread:** Orchestrates strategy cycles and auto-redemption.
+### Visual Documentation
+- [System Architecture](docs/system_architecture.png)
+- [Strategy Flowchart](docs/strategy_flowchart.png)
 
 ---
 
-## 🛠️ Installation & Setup
+## 🛠 Setup & Installation
 
-### 1. Prerequisite
-- Python 3.10+
-- A Polygon wallet with USDC (if not using `DRY_RUN`)
-- Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
+### 1. Requirements
+- Python **3.10+**
+- Polygon Wallet (Private Key)
+- Telegram Bot API Token
 
-### 2. Clone the Repository
+### 2. Fast Installation
 ```bash
+# Clone and enter
 git clone https://github.com/satyamsk05/ogbot-v1.git
 cd ogbot-v1
-```
 
-### 3. Setup Virtual Environment
-```bash
+# Setup environment
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 4. Configuration
-Create a `.env` file from the example:
-```bash
-cp .env.example .env
-```
-
-Edit `.env` with your credentials:
+### 3. Configuration
+Copy `.env.example` to `.env` and fill in your credentials:
 ```env
-PRIVATE_KEY=your_polygon_private_key
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-ALLOWED_CHAT_ID=your_telegram_chat_id
-DRY_RUN=true
-VIRTUAL_START_BALANCE=500
+PRIVATE_KEY=your_private_key
+TELEGRAM_BOT_TOKEN=your_bot_token
+ALLOWED_CHAT_ID=your_telegram_id
+DRY_RUN=True
+HEADLESS=False
 ```
-
-### 5. Server Deployment (Optional)
-To run the bot 24/7 on a server in the background:
-1. Set `HEADLESS=true` in your `.env` file.
-2. The bot will hide the terminal UI and log all activities to `bot.log`.
-3. Use `nohup` or `screen/tmux` to keep it running:
-   ```bash
-   nohup python3 main.py &
-   ```
 
 ---
 
-## 🕹️ Usage
+## 🕹 Usage & Controls
 
-### Running the Bot
+### Starting the Bot
 ```bash
 python3 main.py
 ```
 
-### Logging
-All bot activities, trades, and errors are saved in `bot.log` for easy monitoring on a server.
+### Server Deployment
+For 24/7 background operation:
+```bash
+# Set HEADLESS=True in .env
+nohup python3 main.py &
+```
+*Logs are automatically saved to `bot.log`.*
 
 ### Telegram Commands
-| Command | Action |
-|---------|--------|
-| `/start` | Open the main menu dashboard |
-| `/history` | View the last 20 trades |
-| `/cashout` | Manually redeem all winning positions |
-| `/settings` | Update base bet and martingale type |
+| Action | Detail |
+| :--- | :--- |
+| **🛢 STATUS** | Detailed performance and win-rate statistics. |
+| **💎 WALLET** | Check balance and initiate USDC transfers. |
+| **🟢 START BOT** | Switch to fully automated Martingale mode. |
+| **⚡ RESET** | Manually reset the Martingale progression to Step 1. |
 
 ---
 
-## 🛡️ Betting Systems
+## � Betting Progression
+*Triggered after 3 consecutive same-colored candles.*
 
-| Step | Linear (Safe) | Triple (Max Profit) |
-|------|---------------|---------------------|
-| 1    | $2.0          | $2.0                |
-| 2    | $4.0          | $6.0                |
-| 3    | $6.0          | $18.0               |
-| 4    | $8.0          | $54.0               |
-| 5    | $10.0         | $162.0              |
-
----
-
-## 📂 Project Structure
-
-- `main.py`: Entry point and thread manager.
-- `mode_controller.py`: Core logic orchestration.
-- `strategy_5m.py` / `strategy_15m.py`: Timeframe-specific betting logic.
-- `execution.py`: Integration with Polymarket CLOB.
-- `telegram_bot.py`: Telegram interface and notifications.
-- `dashboard.py`: Terminal UI implementation.
+| Step | Amount | Step | Amount |
+| :--- | :--- | :--- | :--- |
+| **1** | $2.0 | **4** | $22.0 |
+| **2** | $5.0 | **5** | $45.0 |
+| **3** | $10.0 | **6** | $95.0 |
 
 ---
 
 ## ⚖️ Disclaimer
-This bot is for educational purposes only. Trading involves significant risk. Always test in **DRY_RUN** mode before using real funds.
+*This bot is for experimental purposes. Binary options trading involves substantial risk. The developer is not responsible for any financial losses incurred.*
