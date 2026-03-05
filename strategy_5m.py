@@ -24,7 +24,10 @@ class Strategy5M:
         # Warmup: Bot must observe at least 3 fresh candle changes before auto-betting
         self.candles_observed = 0
         self.is_warmed_up = False
-        self.MIN_CANDLES_TO_WARMUP = 3
+        self.MIN_CANDLES_TO_WARMUP = 1
+        
+        self.force_next_bet = False
+        self.forced_signal = ""
         
     def reset_progression(self):
         self.martingale_step = 0
@@ -140,6 +143,8 @@ class Strategy5M:
                 self.mc.add_trade("5m", bet_direction, self.active_bet_amount, "WIN", net_pnl)
                 
                 self.martingale_step = 0
+                self.force_next_bet = False
+                self.forced_signal = ""
                 self.active_bet_slug = ""
                 self.active_bet_side = ""
                 self.active_bet_expiry = 0
@@ -164,6 +169,11 @@ class Strategy5M:
                 self.martingale_step += 1
                 if self.martingale_step >= config.MAX_PROGRESSION_STEPS:
                     self.martingale_step = 0
+                    self.force_next_bet = False
+                else:
+                    self.force_next_bet = True
+                self.forced_signal = self.active_bet_side
+                
                 next_stake = self.get_current_bet_amount()
                 self.active_bet_slug = ""
                 self.active_bet_side = ""
@@ -190,12 +200,21 @@ class Strategy5M:
         # ──── SIGNAL DETECTION (3-CANDLE PATTERN) ────
         # ✅ FIX: slice badal diya taaki live candle exclude ho (always last 3 CLOSED candles)
         closed_candles = live_data['candles'][:-1] if live_data['candles'][-1].get("is_live") else live_data['candles']
-        last3 = [self.get_true_color(c, beat_p) for c in closed_candles[-3:]]
+        
         signal = ""
-        if all(x == "RED" for x in last3):
-            signal = "UP"    # 3 RED candles → bet GREEN (UP)
-        elif all(x == "GREEN" for x in last3):
-            signal = "DOWN"  # 3 GREEN candles → bet RED (DOWN)
+        last3 = [] # Initialize for debugging
+        
+        # Immediate Martingale Logic: If we just lost, force the next bet
+        if self.force_next_bet and self.martingale_step > 0:
+            signal = self.forced_signal
+            print(f"[5m] !!! FORCING IMMEDIATE BET (Martingale Step {self.martingale_step + 1}) !!! Signal: {signal}")
+        else:
+            last3 = [self.get_true_color(c, beat_p) for c in closed_candles[-3:]]
+            if len(last3) == 3:
+                if all(x == "RED" for x in last3):
+                    signal = "UP"    # 3 RED candles → bet GREEN (UP)
+                elif all(x == "GREEN" for x in last3):
+                    signal = "DOWN"  # 3 GREEN candles → bet RED (DOWN)
             
         amount = self.get_current_bet_amount()
         
@@ -226,6 +245,7 @@ class Strategy5M:
                 order_details = result[1] if isinstance(result, tuple) and len(result) > 1 else {}
                 
                 if success:
+                    self.force_next_bet = False # Reset once placed
                     self.active_bet_slug = live_data['current_slug']
                     self.active_bet_side = signal
                     self.active_bet_amount = float(amount)
@@ -256,6 +276,7 @@ class Strategy5M:
                         f"──────────────────\n"
                         f"🕒 `{now_str}`"
                     )
+                    from telegram_bot import send_telegram_notification  # type: ignore
                     send_telegram_notification(notif_msg)
                     
             self.last_processed_candle = last_candle_time

@@ -105,7 +105,7 @@ class Dashboard:
         if isinstance(candles, list) and len(candles) > 0:
             history = " ".join([
                 "🟢" if self.get_true_color(c, beat_price) == 'GREEN' else "🔴"  # ✅ FIX
-                for c in candles[-10:]
+                for c in list(candles)[-10:] # type: ignore
             ])
             
         target_bet = strategy.next_planned_bet
@@ -143,11 +143,19 @@ class Dashboard:
             
         table.add_row("Round vs Live:", f"[dim]${round_price:,.2f}[/dim] ➔ [white]${self.mc.live_price:,.2f}[/white]{diff_str}")
         table.add_row("Closes In:", countdown_str)
-        table.add_row("Target Bet (Auto):", f"[{bet_style}]{target_bet}[/{bet_style}]")
+        # ✅ FIX: Prevent long emoji strings from breaking the terminal layout
+        clean_target = str(target_bet).split('\n')[0].strip()
+        if len(clean_target) > 30:
+            clean_target = str(clean_target)[:27] + "..." # type: ignore
+            
+        table.add_row("Target Bet (Auto):", f"[{bet_style}]{clean_target}[/{bet_style}]")
         
         if strategy.active_bet_side:
             side_color = "green" if strategy.active_bet_side == "UP" else "red"
             bet_info = f"[{side_color}]BET {strategy.active_bet_side}[/{side_color}] [yellow]${strategy.active_bet_amount:.2f}[/yellow]"
+            # Truncate if too long (type-safe for linter)
+            if len(bet_info) > 30: 
+                bet_info = str(bet_info)[:27] + "..." # type: ignore
             table.add_row("Live Bet:", bet_info)
         else:
             table.add_row("Live Bet:", "[dim]None[/dim]")

@@ -1,15 +1,18 @@
 import telebot  # type: ignore
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton  # type: ignore
+import logging
+logger = logging.getLogger("bot")
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove  # type: ignore
+from telebot.apihelper import ApiTelegramException # type: ignore
 import config  # type: ignore
 import threading
 import time
 from datetime import datetime
-import risk_manager
-import execution
-import fund_transfer
+import risk_manager # type: ignore
+import execution # type: ignore
+import fund_transfer # type: ignore
 
 class NavCall:
-    def __init__(self, data, message, call_id):
+    def __init__(self, data, message, call_id=None):
         self.data = data
         self.message = message
         self.id = call_id
@@ -54,8 +57,10 @@ def run_telegram_bot(mc):
         if not closed_n:
             return "          "
             
-        last_n = closed_n[-9:]
-        streak_color = last_n[-1].get('color', 'RED')
+        last_n = list(closed_n)[-9:] # type: ignore
+        if not last_n: return "          "
+        
+        streak_color = str(last_n[-1].get('color', 'RED'))
         streak = 0
         for c in reversed(last_n):
             if c.get('color') == streak_color:
@@ -68,7 +73,7 @@ def run_telegram_bot(mc):
         return f"{icon} *{streak}x {streak_color}*"
 
     def get_header():
-        now = datetime.now(tz=config.ET_TZ).strftime("%I:%M %p")
+        now = datetime.now(tz=config.ET_TZ).strftime("%I:%M:%S %p")
 
         if mc.bot_mode == "AUTO":
             status_line = "⚡ `RUNNING`"
@@ -161,28 +166,18 @@ def run_telegram_bot(mc):
         
         # Row 1: STATUS | WALLET
         markup.add(
-            InlineKeyboardButton("🛢 SATUS", callback_data="nav_status"),
+            InlineKeyboardButton("🛢 STATUS", callback_data="nav_status"),
             InlineKeyboardButton("💳 WALLET", callback_data="nav_transfer")
         )
         
-        # Row 2: START BOT | STOP BOT
-        # Based on current mode highlight or logic
+        # Row 2: Toggle START / STOP
         if mc.bot_mode == "MANUAL":
-            markup.add(
-                InlineKeyboardButton("🟢 START BOT", callback_data="set_mode_AUTO"),
-                InlineKeyboardButton("🔴 STOP BOT (Active)", callback_data="nav_home")
-            )
+            markup.row(InlineKeyboardButton("🟢 START BOT", callback_data="set_mode_AUTO"))
         else:
-            markup.add(
-                InlineKeyboardButton("🟢 START BOT (Active)", callback_data="nav_home"),
-                InlineKeyboardButton("🔴 STOP BOT", callback_data="set_mode_MANUAL")
-            )
+            markup.row(InlineKeyboardButton("🔴 STOP BOT", callback_data="set_mode_MANUAL"))
             
-        # Row 3: MARTINGALE RESET | HISTORY
-        markup.add(
-            InlineKeyboardButton("⚡ MARTINGALE RESET", callback_data="reset_martingale"),
-            InlineKeyboardButton("📊 HISTORY", callback_data="nav_trade_history")
-        )
+        # Row 3: HISTORY
+        markup.row(InlineKeyboardButton("📊 TRADE HISTORY", callback_data="nav_trade_history"))
         
         # Row 4: Navigation / Refresh
         markup.row(
@@ -195,11 +190,8 @@ def run_telegram_bot(mc):
         return markup
 
     def main_reply_markup():
-        markup = ReplyKeyboardMarkup(resize_keyboard=True)
-        markup.row(KeyboardButton("🛢 STATUS"), KeyboardButton("💎 WALLET"))
-        markup.row(KeyboardButton("🟢 START BOT"), KeyboardButton("🔴 STOP BOT"))
-        markup.row(KeyboardButton("⚡ MARTINGALE RESET"), KeyboardButton("📊 HISTORY"))
-        return markup
+        # Revert: Remove persistent menu
+        return ReplyKeyboardRemove()
 
     def trade_menu_markup(timeframe):
         markup = InlineKeyboardMarkup(row_width=2)
@@ -228,8 +220,11 @@ def run_telegram_bot(mc):
             InlineKeyboardButton("📝 Trade History", callback_data="nav_trade_history"),
             InlineKeyboardButton("📊 Daily Report", callback_data="nav_daily_report")
         )
-        # Force Test button to its own row for better visibility
-        markup.row(InlineKeyboardButton("📢 Test All Alerts", callback_data="test_all_alerts"))
+        # Row 3: TEST ALERTS | MARTINGALE RESET
+        markup.add(
+            InlineKeyboardButton("📢 Test Alerts", callback_data="test_all_alerts"),
+            InlineKeyboardButton("⚡ Reset Martingale", callback_data="reset_martingale")
+        )
         
         if config.DRY_RUN:
             markup.add(
@@ -252,18 +247,17 @@ def run_telegram_bot(mc):
     @bot.message_handler(commands=['start', 'menu', 'home'])
     def send_welcome(message):
         if not is_allowed(message): return
-        bot.send_message(message.chat.id, get_header() + "\n🎯 *Main Menu:*",
-                         reply_markup=main_reply_markup(), parse_mode="Markdown")
-        # Also send the inline keyboard as a second message if you want both
-        bot.send_message(message.chat.id, "🎯 *Interactive Interface:*", 
+        # First send a message to remove the sticky reply keyboard if it exists
+        bot.send_message(message.chat.id, "🔄 Bot Interface Loading...", reply_markup=ReplyKeyboardRemove())
+        # Then send the actual interactive menu
+        bot.send_message(message.chat.id, get_header() + "\n🎯 *OGBot Terminal Ready*",
                          reply_markup=main_menu_markup(), parse_mode="Markdown")
 
     @bot.message_handler(func=lambda message: True)
     def handle_text_buttons(message):
         if not is_allowed(message): return
-        text = message.text
+        text = message.text.upper()
         if "STATUS" in text:
-            # Re-use nav_handler logic for 'status'
             nav_handler(NavCall("nav_status", message, "0"))
         elif "WALLET" in text:
             nav_handler(NavCall("nav_transfer", message, "0"))
@@ -277,6 +271,10 @@ def run_telegram_bot(mc):
             reset_martingale_handler(NavCall("reset_martingale", message, "0"))
         elif "HISTORY" in text:
             nav_handler(NavCall("nav_trade_history", message, "0"))
+        elif "SETTINGS" in text:
+            nav_handler(NavCall("nav_settings", message, "0"))
+        elif "REFRESH" in text:
+            send_welcome(message)
         else:
             # Fallback for other text
             send_welcome(message)
@@ -284,28 +282,31 @@ def run_telegram_bot(mc):
     @bot.callback_query_handler(func=lambda call: call.data.startswith('nav_'))
     def nav_handler(call):
         if not is_allowed(call.message): return
+        
+        # Check if this is a real callback or a simulated NavCall from a text message
+        is_callback = hasattr(call, 'id') and call.id is not None
         page = call.data.replace("nav_", "")
+        
         try:
+            header = get_header()
+            markup = None
+            text = ""
+            
             if page == "home":
-                bot.edit_message_text(get_header() + "\n🎯 *Main Menu:*",
-                                     chat_id=call.message.chat.id, message_id=call.message.message_id,
-                                     reply_markup=main_menu_markup(), parse_mode="Markdown")
+                text = header + "\n🎯 *OGBot Terminal Ready*"
+                markup = main_menu_markup()
             elif page == "trade_5m":
-                bot.edit_message_text(get_header() + "\n📈 *5-Minute Market Controls:*",
-                                     chat_id=call.message.chat.id, message_id=call.message.message_id,
-                                     reply_markup=trade_menu_markup("5m"), parse_mode="Markdown")
+                text = header + "\n📈 *5-Minute Market Controls:*"
+                markup = trade_menu_markup("5m")
             elif page == "trade_15m":
-                bot.edit_message_text(get_header() + "\n📉 *15-Minute Market Controls:*",
-                                     chat_id=call.message.chat.id, message_id=call.message.message_id,
-                                     reply_markup=trade_menu_markup("15m"), parse_mode="Markdown")
+                text = header + "\n📉 *15-Minute Market Controls:*"
+                markup = trade_menu_markup("15m")
             elif page == "settings":
-                bot.edit_message_text(get_header() + "\n⚙️ *Bot Settings:*",
-                                     chat_id=call.message.chat.id, message_id=call.message.message_id,
-                                     reply_markup=settings_menu_markup(), parse_mode="Markdown")
+                text = header + "\n⚙️ *Bot Settings:*"
+                markup = settings_menu_markup()
             elif page == "market_mode":
-                bot.edit_message_text(get_header() + "\n🕒 *Choose Market Tracking:*",
-                                     chat_id=call.message.chat.id, message_id=call.message.message_id,
-                                     reply_markup=market_mode_markup(), parse_mode="Markdown")
+                text = header + "\n🕒 *Choose Market Tracking:*"
+                markup = market_mode_markup()
             elif page == "sim_settings":
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(
@@ -314,21 +315,7 @@ def run_telegram_bot(mc):
                     InlineKeyboardButton("💰 Set Custom Balance", callback_data="set_sim_bal"),
                     InlineKeyboardButton("⬅️ Back", callback_data="nav_settings")
                 )
-                bot.edit_message_text(f"⚙️ *Simulation Settings*\n\nFees and slippage make the dry-run more realistic.",
-                                     chat_id=call.message.chat.id, message_id=call.message.message_id,
-                                     reply_markup=markup, parse_mode="Markdown")
-            elif page == "trade_history":
-                markup = InlineKeyboardMarkup()
-                markup.add(InlineKeyboardButton("⬅️ Back", callback_data="nav_settings"))
-                bot.edit_message_text(mc.get_trade_history_text(),
-                                     chat_id=call.message.chat.id, message_id=call.message.message_id,
-                                     reply_markup=markup, parse_mode="Markdown")
-            elif page == "daily_report":
-                markup = InlineKeyboardMarkup()
-                markup.add(InlineKeyboardButton("⬅️ Back", callback_data="nav_settings"))
-                bot.edit_message_text(mc.get_daily_summary(),
-                                     chat_id=call.message.chat.id, message_id=call.message.message_id,
-                                     reply_markup=markup, parse_mode="Markdown")
+                text = f"⚙️ *Simulation Settings*\n\nFees and slippage make the dry-run more realistic."
             elif page == "status":
                 s5 = mc.strategy_5m
                 s15 = mc.strategy_15m
@@ -343,25 +330,55 @@ def run_telegram_bot(mc):
                     f"• Betting: `{mc.martingale_type}`\n"
                     f"• 5m Wins/Losses: `{s5.wins}/{s5.losses}`\n"
                     f"• 15m Wins/Losses: `{s15.wins}/{s15.losses}`\n"
-                    f"• 5m Step: `{s5.martingale_step + 1}` ({s5.next_planned_bet})\n"
-                    f"• 15m Step: `{s15.martingale_step + 1}` ({s15.next_planned_bet})\n"
-                    f"• 5m Warmed Up: `{'✅' if s5.is_warmed_up else '❌'}`\n"
-                    f"• 15m Warmed Up: `{'✅' if s15.is_warmed_up else '❌'}`\n\n"
-                    f"📈 *Simulation Performance:*\n"
-                    f"• Win Rate: `{((mc.sim_wins/mc.sim_trades)*100 if mc.sim_trades>0 else 0):.1f}%`\n"
-                    f"• Total Stakes: `${mc.sim_stake:,.2f}`\n"
-                    f"• Net Goal: `$500 ➔ ${mc.current_balance:,.2f}`\n"
+                    f"• 5m Step: `{s5.martingale_step + 1}`\n"
+                    f"• 15m Step: `{s15.martingale_step + 1}`\n"
+                    f"• 5m Status: `{s5.next_planned_bet}`\n"
+                    f"• 15m Status: `{s15.next_planned_bet}`\n\n"
+                    f"📈 *Simulation Stats:* `W: {mc.sim_wins} / T: {mc.sim_trades}`\n"
+                    f"• Volume: `${mc.sim_stake:,.2f}`\n"
                     f"• Network: `Polygon Mainnet`"
                 )
+                text = status_text
                 markup = InlineKeyboardMarkup()
                 markup.add(InlineKeyboardButton("⬅️ Back", callback_data="nav_settings"))
-                bot.edit_message_text(status_text, chat_id=call.message.chat.id, message_id=call.message.message_id,
-                                     reply_markup=markup, parse_mode="Markdown")
+            elif page == "trade_history":
+                text = mc.get_trade_history_text()
+                markup = InlineKeyboardMarkup()
+                markup.add(InlineKeyboardButton("⬅️ Back", callback_data="nav_settings"))
+            elif page == "daily_report":
+                text = mc.get_daily_summary()
+                markup = InlineKeyboardMarkup()
+                markup.add(InlineKeyboardButton("⬅️ Back", callback_data="nav_settings"))
             elif page.startswith("limit_"):
                 tf = page.split("_")[1]
                 start_limit_flow(call.message, tf)
+                return # Exit early as start_limit_flow handles message sending
             elif page == "transfer":
                 start_transfer_flow(call.message)
+                return # Exit early as start_transfer_flow handles message sending
+            else:
+                text = header + "\n🎯 *Main Menu:*"
+                markup = main_reply_markup()
+
+            if is_callback:
+                try:
+                    bot.edit_message_text(text, chat_id=call.message.chat.id, message_id=call.message.message_id,
+                                         reply_markup=markup, parse_mode="Markdown")
+                    bot.answer_callback_query(call.id, "🔄 Refreshed")
+                except ApiTelegramException as e:
+                    if "message is not modified" in e.description.lower():
+                        bot.answer_callback_query(call.id, "✅ Up to date")
+                    else:
+                        logger.warning(f"Could edit error: {e}")
+                        bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode="Markdown")
+                        bot.answer_callback_query(call.id)
+                except Exception as e:
+                    logger.warning(f"Nav Edit error: {e}")
+                    bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode="Markdown")
+                    bot.answer_callback_query(call.id)
+            else:
+                bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode="Markdown")
+
         except Exception as e:
             bot.answer_callback_query(call.id, "Error in navigation")
             print(f"Nav error: {e}")

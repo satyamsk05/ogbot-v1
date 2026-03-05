@@ -69,7 +69,11 @@ def fetch_market_data(mc, timeframe="5m", interval_seconds=300):
                     if len(tokens) >= 2:
                         target_data['up_token'] = tokens[0]
                         target_data['down_token'] = tokens[1]
-            except Exception:
+                        logger.info(f"[{timeframe}] Tokens loaded for {slug}")
+                else:
+                    logger.warning(f"[{timeframe}] No market found for slug: {slug}")
+            except Exception as e:
+                logger.error(f"[{timeframe}] Gamma API Error for {slug}: {e}")
                 pass
 
             # 2. Fetch standard Binance BTC OHLC charts
@@ -114,9 +118,7 @@ def fetch_market_data(mc, timeframe="5m", interval_seconds=300):
         except Exception as e:
             pass
 
-        time.sleep(5)
-
-        time.sleep(5)
+        time.sleep(10)
 
 
 def daily_summary_scheduler(mc):
@@ -162,9 +164,11 @@ def main():
                 if current_time - last_process_time >= 5:
                     mc.process_cycle()
                     last_process_time = current_time
-                    # Minimal log to show life
+                    # Enhanced Heartbeat log
                     if int(current_time) % 60 < 5: 
-                        logger.info(f"Heartbeat: Bal=${mc.current_balance:.2f} | PnL=${mc.daily_pnl:.2f}")
+                        s5_status = mc.strategy_5m.next_planned_bet
+                        s15_status = mc.strategy_15m.next_planned_bet
+                        logger.info(f"Heartbeat: Bal=${mc.current_balance:.2f} | 5m: {s5_status} | 15m: {s15_status}")
                 time.sleep(1)
         else:
             # Interactive UI Loop

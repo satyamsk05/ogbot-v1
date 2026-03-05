@@ -1,6 +1,6 @@
 import os
-import config
-from web3 import Web3
+import config # type: ignore
+from web3 import Web3 # type: ignore
 from web3.middleware import ExtraDataToPOAMiddleware # type: ignore
 
 # Known USDC contract addresses on Polygon

@@ -104,14 +104,34 @@ nohup python3 main.py &
 
 ---
 
-## � Betting Progression
-*Triggered after 3 consecutive same-colored candles.*
+## 📊 Betting Logic (Step-by-Step)
+
+The bot operates on a **Reversal Strategy** combined with a **Fast Martingale Recovery** system.
+
+### 1. The Trigger (Signal Detection)
+The bot monitors the candle colors on the 5m and 15m charts. A signal is generated after **3 consecutive candles** of the same color:
+- **3 RED Candles** ➔ Signal: **UP (Green)**
+- **3 GREEN Candles** ➔ Signal: **DOWN (Red)**
+*This is based on the probability that a trend is likely to reverse after a 3-candle streak.*
+
+### 2. Immediate Martingale (Fast Recovery)
+Unlike standard bots that wait for a new signal after a loss, OGBot v1+ uses an **Immediate Recovery** system:
+- **If Step 1 Wins:** The bot resets and waits for a new 3-candle signal.
+- **If Step 1 Loses:** The bot **immediately** places a Step 2 bet on the **very next candle** in the same direction.
+- **Consecutive Betting:** It will continue to bet on every new candle until:
+    - A **WIN** occurs (Progression resets to Step 1).
+    - The **MAX STEP (6)** is reached (Progression resets to Step 1).
+
+### 3. Progression Sequence
+The bot uses a custom progression to recover losses and secure profit:
 
 | Step | Amount | Step | Amount |
 | :--- | :--- | :--- | :--- |
-| **1** | $2.0 | **4** | $22.0 |
-| **2** | $5.0 | **5** | $45.0 |
-| **3** | $10.0 | **6** | $95.0 |
+| **1** | $2.00 | **4** | $22.00 |
+| **2** | $5.00 | **5** | $45.00 |
+| **3** | $10.00 | **6** | $95.00 |
+
+---
 
 ---
 
