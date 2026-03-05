@@ -18,6 +18,7 @@ class Strategy15M:
         self.last_processed_candle = ""
         self.wins = 0
         self.losses = 0
+        self.active_bet_target_price = 0.0
         self.next_planned_bet = "Warming up..."
         self.enabled = True
         
@@ -36,6 +37,7 @@ class Strategy15M:
         self.active_bet_expiry = 0
         self.active_bet_amount = 0.0
         self.active_shares = 0.0
+        self.active_bet_target_price = 0.0
         self.next_planned_bet = "None"
         # Also reset warmup so bot re-observes candles
         self.candles_observed = 0
@@ -120,16 +122,22 @@ class Strategy15M:
                 self.last_processed_candle = last_candle_time
                 return
         
-        # ──── WIN/LOSS CHECK ────
         now = time.time()
-        if self.active_bet_slug and now > (self.active_bet_expiry + 30):
-            prev_candle = live_data['candles'][-1]
+        if self.active_bet_slug and now > (self.active_bet_expiry + 2):
+            # ✅ FIX: Resolution logic - use last closed candle and original target price
+            closed_candles = live_data['candles'][:-1] if live_data['candles'][-1].get("is_live") else live_data['candles']
             
+            if not closed_candles:
+                return
+
+            prev_candle = closed_candles[-1]
+            target_p = self.active_bet_target_price if self.active_bet_target_price > 0 else beat_p
+
             won = False
             if self.active_bet_side == "UP":
-                won = prev_candle['close'] > beat_p
+                won = prev_candle['close'] > target_p
             else:
-                won = prev_candle['close'] < beat_p
+                won = prev_candle['close'] < target_p
                   
             bet_direction = self.active_bet_side
             
@@ -212,6 +220,7 @@ class Strategy15M:
         if self.force_next_bet and self.martingale_step > 0:
             signal = self.forced_signal
             print(f"[15m] !!! FORCING IMMEDIATE BET (Martingale Step {self.martingale_step + 1}) !!! Signal: {signal}")
+        else:
             last3 = [self.get_true_color(c, beat_p) for c in closed_candles[-3:]]
             if len(last3) == 3:
                 if all(x == "RED" for x in last3):
@@ -256,6 +265,7 @@ class Strategy15M:
                     self.active_bet_side = signal
                     self.active_bet_amount = float(amount)
                     self.active_shares = float(order_details.get("shares_acquired") or (amount / 0.50))
+                    self.active_bet_target_price = float(beat_p)
                     
                     if config.DRY_RUN:
                         self.mc.update_virtual_pnl(-amount, stake=amount)

@@ -8,23 +8,53 @@
 
 ---
 
-## 2. Auto-Betting Strategy Flowchart
+## 2. Betting System Architecture
 
-![Strategy Flowchart](docs/strategy_flowchart.png)
+The OGBot v1+ betting engine is a high-precision, state-based system that combines pattern recognition with aggressive recovery logic.
+
+### 📊 Strategy Flowchart
+
+```mermaid
+graph TD
+    A[Start Cycle] --> B{Active Bet?}
+    B -- Yes --> C{Round Expired + Delay?}
+    C -- Yes --> D[Resolve Bet vs Target Price]
+    D --> E{WIN?}
+    E -- Yes --> F[Reset Martingale Step 0]
+    E -- No --> G[Inc Martingale Step + Set Force]
+    
+    B -- No --> H{Force Next Bet?}
+    H -- Yes --> I[Place Next Martingale Step Bet]
+    H -- No --> J{3-Candle Signal?}
+    J -- Yes --> K[Place Step 1 Bet]
+    J -- No --> L[Wait for Next Cycle]
+    
+    F --> L
+    G --> L
+    I --> L
+    K --> L
+```
 
 ---
 
-## 3. Martingale Betting Systems
+---
 
-| | 🛡️ SAFE (Linear) | 🚀 HIGH PROFIT (Triple) |
+## 3. Martingale Betting Progression
+
+The bot uses a **Fixed Recovery Sequence** to ensure losses are recovered and profit is secured within 6 steps.
+
+| Step | Amount | Recovery Logic |
 |---|---|---|
-| Step 1 | $1 | $1 |
-| Step 2 | $2 | $3 |
-| Step 3 | $3 | $9 |
-| Step 4 | $4 | $27 |
-| Step 5 | $5 | $81 |
-| **WIN** | Reset → Step 1 ✅ | Reset → Step 1 ✅ |
-| **LOSS** | Next Step ❌ | Next Step ❌ |
+| Step 1 | $2.00 | Base Entry (Reversal) |
+| Step 2 | $5.00 | Immediate Follow-up |
+| Step 3 | $10.00 | Immediate Follow-up |
+| Step 4 | $22.00 | Immediate Follow-up |
+| Step 5 | $45.00 | Immediate Follow-up |
+| Step 6 | $95.00 | Final Recovery |
+| **WIN** | Reset | Back to Step 1 ✅ |
+| **LOSS** | Next | Continue to Next Step ❌ |
+
+---
 
 ---
 
@@ -133,12 +163,16 @@ Binance API ──(candles)──► main.py ──► ModeController.data_5m/da
 
 ---
 
-## 9. Premium Notification System
+## 10. Technical Concepts
 
-OGBot uses a premium visual design for Telegram alerts to ensure clarity and professional aesthetics.
+### 🎯 Target Price Persistence
+To prevent "Ghost Losses" caused by market jitter at round starts:
+- **Storage:** The `active_bet_target_price` is stored at the exact moment a trade is placed.
+- **Comparison:** Resolution is performed by comparing the **Last Closed Candle** price against this **Persistent Target**, NOT the current live price.
 
-### Key Components:
-- **Visual Trends:** Uses circular indicators (🟢/🔴) for candle history.
-- **Dynamic Headers:** Bold headers with icons (💎 OGBot Premium) for instant recognition.
-- **Organized Data:** Clear separation of Action, Stake, Target, and Shares using symbols.
-- **Martingale Tracking:** Explicit step tracking (Step 1, Step 2, etc.) in every alert.
+### ⚡ Immediate Martingale
+- **Signal Independence:** After a loss, the bot enters a "Forced State" (`force_next_bet = True`).
+- **Consecutive Entry:** Forcing allows the bot to skip the 3-candle pattern search and place the next bet at the very beginning (0.0s) of the next candle.
+- **Profit Seeker:** This maximizes recovery speed by staying on the trend until it flips.
+
+---
