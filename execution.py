@@ -60,95 +60,59 @@ def redeem_all_funds(client):
     print(f"\033[94m[Cashout] Starting full scan for redeemable positions...\033[0m")
     
     try:
-        # Use a public Polygon RPC if none provided in env
-        rpc_url = os.getenv("RPC_URL", "https://polygon-rpc.com")
-        w3 = Web3(Web3.HTTPProvider(rpc_url))
+        # ✅ FIX: Use robust fallback RPCs from config
+        w3 = config.get_w3()
         
-        if not w3.is_connected():
+        if not w3 or not w3.is_connected():
             print("\033[91m[Cashout] Web3 connection failed. Skipping.\033[0m")
             return False
 
         account_addr = client.get_address()
         contract = w3.eth.contract(address=Web3.to_checksum_address(CONDITIONAL_TOKENS_ADDRESS), abi=json.loads(CONDITIONAL_TOKENS_ABI))
         
-        # 1. Check Positions
-        positions = client.get_positions()
+        # 1. Digital Asset Scan (Replacement for missing get_positions)
+        # Note: Current CLOB SDK may not support direct 'get_positions'. 
+        # We rely on notifications for settlement alerts which is more efficient.
         found_any = False
-        
-        # Track conditions we've already tried to redeem in this pass to avoid duplicates
         processed_conditions = set()
 
-        if positions:
-            for pos in positions:
-                size = float(pos.get('size', 0))
-                if size < 0.01: continue
-                
-                token_id = pos.get('asset_id')
-                try:
-                    # Get market info to find condition_id and collateral_token
-                    m_info = client.get_market(token_id)
-                    condition_id = m_info.get('condition_id')
-                    collateral_token = m_info.get('collateral_token')
-                    
-                    if not condition_id or not collateral_token:
-                        continue
-                        
-                    if condition_id in processed_conditions:
-                        continue
-
-                    # indexSets for binary markets: [1, 2] usually covers both Yes and No
-                    index_sets = [1, 2] 
-                    
-                    # Optional: Check if market is closed via Gamma for better logging, but don't block
-                    slug = m_info.get('slug', 'Unknown')
-                    print(f"\033[94m[Cashout] Found position in {slug}. Attempting redemption...\033[0m")
-                    
-                    if config.DRY_RUN:
-                        print(f"\033[96m[DRY RUN] Would redeem {size} shares for {slug}\033[0m")
-                        found_any = True
-                        processed_conditions.add(condition_id)
-                        continue
-
-                    # Build and send transaction
-                    nonce = w3.eth.get_transaction_count(Web3.to_checksum_address(account_addr))
-                    tx = contract.functions.redeemPositions(
-                        Web3.to_checksum_address(collateral_token),
-                        "0x" + "0" * 64, # parentCollectionId
-                        Web3.to_bytes(hexstr=condition_id),
-                        index_sets
-                    ).build_transaction({
-                        'from': Web3.to_checksum_address(account_addr),
-                        'nonce': nonce,
-                        'gas': 250000,
-                        'gasPrice': w3.eth.gas_price
-                    })
-                    
-                    signed_tx = w3.eth.account.sign_transaction(tx, private_key=config.PRIVATE_KEY)
-                    tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
-                    print(f"\033[92m[Cashout] Success! Redemption sent for {slug}. TX: {tx_hash.hex()}\033[0m")
-                    found_any = True
-                    processed_conditions.add(condition_id)
-                except Exception as e:
-                    # Log failure but continue with next position
-                    print(f"\033[93m[Cashout] Redemption attempt skipped for {token_id[:10]}: {e}\033[0m")
-                    continue
-
-        # 2. Check Notifications (sometimes claimable markets appear here)
+        # 2. Check Notifications (Efficient way to find claimable markets)
         try:
             notifications = client.get_notifications()
             if notifications:
                 for note in notifications:
-                    # Note structure varies, but we look for claimable indicators
-                    if note.get('type') == 'REWARD' or 'claim' in str(note).lower():
-                        # If we can extract a condition_id here, try it
+                    # Note structure varies, but we look for settlement/claim indicators
+                    if note.get('type') == 'SETTLEMENT' or 'claim' in str(note).lower():
                         cid = note.get('condition_id')
                         col = note.get('collateral_token')
                         if cid and col and cid not in processed_conditions:
-                            print(f"\033[94m[Cashout] Found claimable reward in notifications. Redeeming...\033[0m")
-                            # ... logic similar to above ...
-                            # (Omitted simplified for now, as get_market is more reliable if we have token_id)
-        except Exception:
-            pass
+                            print(f"\033[94m[Cashout] Found claimable position in notifications. Redeeming...\033[0m")
+                            
+                            try:
+                                # indexSets for binary markets: [1, 2] usually covers both Yes and No
+                                index_sets = [1, 2] 
+                                nonce = w3.eth.get_transaction_count(Web3.to_checksum_address(account_addr))
+                                tx = contract.functions.redeemPositions(
+                                    Web3.to_checksum_address(col),
+                                    "0x" + "0" * 64, # parentCollectionId
+                                    Web3.to_bytes(hexstr=cid),
+                                    index_sets
+                                ).build_transaction({
+                                    'from': Web3.to_checksum_address(account_addr),
+                                    'nonce': nonce,
+                                    'gas': 250000,
+                                    'gasPrice': w3.eth.gas_price
+                                })
+                                
+                                signed_tx = w3.eth.account.sign_transaction(tx, private_key=config.PRIVATE_KEY)
+                                tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+                                print(f"\033[92m[Cashout] Success! Redemption sent. TX: {tx_hash.hex()}\033[0m")
+                                processed_conditions.add(cid)
+                                found_any = True
+                            except Exception as re:
+                                print(f"\033[91m[Cashout] Redemption TX failed for {cid[:10]}: {re}\033[0m")
+        except Exception as e:
+            print(f"\033[93m[Cashout] Notification check skipped: {e}\033[0m")
 
         if not found_any:
             print("\033[94m[Cashout] Scan complete. No redeemable positions found at this time.\033[0m")

@@ -1,5 +1,7 @@
 import os
 from dotenv import load_dotenv  # type: ignore
+from web3 import Web3
+from web3.middleware import ExtraDataToPOAMiddleware # type: ignore
 
 load_dotenv()
 
@@ -36,3 +38,28 @@ LOG_FILE = "bot.log"
 
 from zoneinfo import ZoneInfo
 ET_TZ = ZoneInfo("America/New_York")
+
+# RPC & Web3 Settings
+POLYGON_RPCS = [
+    "https://polygon-rpc.com",
+    "https://rpc-mainnet.maticvigil.com",
+    "https://rpc.ankr.com/polygon",
+    "https://1rpc.io/matic"
+]
+
+def get_w3():
+    """Returns a connected Web3 instance using fallback RPCs."""
+    
+    # Try custom RPC from env first
+    env_rpc = os.getenv("RPC_URL")
+    rpcs = [env_rpc] + POLYGON_RPCS if env_rpc else POLYGON_RPCS
+    
+    for url in rpcs:
+        try:
+            w3 = Web3(Web3.HTTPProvider(url, request_kwargs={'timeout': 10}))
+            if w3.is_connected():
+                w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+                return w3
+        except Exception:
+            continue
+    return None

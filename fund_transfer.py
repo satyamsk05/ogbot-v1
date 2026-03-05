@@ -38,13 +38,11 @@ def transfer_usdc(to_address: str, amount_usd: float) -> tuple[bool, str]:
     if not config.PRIVATE_KEY:
         return False, "PRIVATE_KEY not found in config."
         
-    rpc_url = os.getenv("RPC_URL", "https://polygon-rpc.com")
+    # ✅ FIX: Use robust fallback RPCs from config
+    w3 = config.get_w3()
     
-    w3 = Web3(Web3.HTTPProvider(rpc_url))
-    w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
-    
-    if not w3.is_connected():
-        return False, "Failed to connect to Polygon network."
+    if not w3 or not w3.is_connected():
+        return False, "Failed to connect to Polygon network (All RPCs failed)."
         
     if not w3.is_address(to_address):
         return False, f"Invalid destination address: {to_address}"
